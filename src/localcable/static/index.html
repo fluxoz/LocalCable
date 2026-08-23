@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LocalCable Guide</title>
+  <link rel="stylesheet" href="/static/guide.css">
+</head>
+<body>
+  <div id="guide">
+    <header id="guide-header">
+      <div id="header-top">
+        <img id="provider-logo" src="/logo" alt="Provider logo">
+        <div id="header-labels">
+          <span id="header-label">TV Listings</span>
+          <span id="clock" aria-live="polite"></span>
+        </div>
+      </div>
+      <section id="detail-panel" aria-live="polite">
+        <div id="detail-main">
+          <div id="detail-title-row">
+            <h1 id="detail-title">Select a program</h1>
+            <span id="detail-channel"></span>
+            <span id="detail-rating">No rating</span>
+          </div>
+          <div id="detail-time"></div>
+          <p id="detail-description">Point LocalCable at a media folder. Each subfolder becomes a channel.</p>
+          <button type="button" id="play-button" disabled>Watch</button>
+        </div>
+        <div id="detail-thumb" aria-hidden="true">
+          <div class="thumb-placeholder">TV</div>
+        </div>
+      </section>
+    </header>
+
+    <div id="guide-body">
+      <button type="button" id="scroll-earlier" class="time-nav" aria-label="Scroll earlier">‹</button>
+      <button type="button" id="scroll-later" class="time-nav" aria-label="Scroll later">›</button>
+      <div id="grid-scroll">
+        <div id="time-bar-label">Today</div>
+        <div id="time-axis"></div>
+        <div id="channel-column"></div>
+        <div id="program-grid">
+          <div id="now-line"></div>
+        </div>
+      </div>
+    </div>
+
+    <footer id="guide-footer">
+      <span id="footer-status">Click a program to select · Watch or double-click to play in mpv</span>
+      <span id="footer-meta"></span>
+    </footer>
+  </div>
+  <script src="/static/guide.js"></script>
+</body>
+</html>

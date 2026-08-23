@@ -1,0 +1,26 @@
+# Copy to ~/.config/localcable/settings.yaml and edit the paths.
+
+media_roots:
+  - ~/Videos/LocalCableMedia
+
+# Optional: defaults to the directory that contains this file.
+# config_dir: ~/.config/localcable
+
+schedule:
+  window_hours_before: 6
+  window_hours_after: 18
+  default_mode: sequential        # or random
+
+playback:
+  player: mpv
+  mpv_args: ["--fullscreen", "--hwdec=auto"]
+  start_from: beginning
+
+ui:
+  theme: xfinity
+  auto_open_browser: true         # headed mode
+  bind_host: 127.0.0.1
+  bind_port: 8787
+
+# File in the config directory (PNG/SVG/JPG). Served top-left of the guide.
+logo: provider_logo.png
