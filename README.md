@@ -26,6 +26,31 @@ Or:
 pip install -e ".[dev]"
 ```
 
+## Update
+
+From the clone (stop LocalCable first if it is running):
+
+```bash
+cd LocalCable
+git pull
+uv sync --extra dev
+```
+
+Or with pip:
+
+```bash
+git pull
+pip install -e ".[dev]"
+```
+
+Then start LocalCable again as usual. After an update:
+
+- **Quit any leftover mpv window** so it respawns with the new lua script, key bindings, and CRT filter.
+- **Hard-refresh the guide** in the browser (or close the tab and reopen http://127.0.0.1:8787/) so CSS/JS is not served from cache.
+- **New `settings.yaml` keys are optional** — missing fields keep their defaults. Compare with `example/settings.yaml` if you want the new options (banner, artwork, remote, `playback.filter`).
+
+IR grab support is extra: `uv sync --extra remote` (or `pip install -e ".[dev,remote]"`).
+
 ## Media folder layout
 
 ```
