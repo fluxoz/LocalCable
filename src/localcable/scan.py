@@ -245,7 +245,7 @@ def scan_media_root(
             )
         except OSError as exc:
             log.warning("cannot list channel folder %s: %s", folder, exc)
-            continue
+            files = []
         for file_path in files:
             key = str(file_path.resolve()) if file_path.exists() else str(file_path)
             cached = _media_from_cache(file_path, cache.get(key) or {}) if key in cache else None
@@ -264,9 +264,6 @@ def scan_media_root(
             media.append(item)
             cache[str(item.path)] = _cache_record(file_path, item)
             cache_dirty = True
-        if not media:
-            log.info("skipping empty channel folder %s", folder)
-            continue
         playlist = find_playlist(folder)
         channels.append(
             Channel(

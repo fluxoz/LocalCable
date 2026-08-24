@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from localcable.models import Channel
 from localcable.scan import scan_media_root
 from localcable.schedule import generate_schedule, sequence_for_channel
 
@@ -123,3 +124,29 @@ def test_unnumbered_channel_appears_in_schedule(media_root: Path, frozen_now: da
     assert hbo.number == 2
     assert hbo.programs
     assert hbo.programs[0].title == "Big Movie"
+
+
+def test_empty_channel_appears_with_no_programs(tmp_path: Path, frozen_now: datetime):
+    empty = Channel(
+        number=42,
+        name="GAP",
+        folder_path=tmp_path / "42_GAP",
+        media=[],
+    )
+    filled = Channel(
+        number=101,
+        name="CNN",
+        folder_path=tmp_path / "101_CNN",
+        media=[],
+    )
+    schedule = generate_schedule(
+        [empty, filled],
+        now=frozen_now,
+        window_hours_before=_window_hours(8),
+        window_hours_after=_window_hours(8),
+    )
+    names = [ch.name for ch in schedule.channels]
+    assert names == ["GAP", "CNN"]
+    gap = schedule.channels[0]
+    assert gap.number == 42
+    assert gap.programs == []

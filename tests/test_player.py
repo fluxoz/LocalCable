@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from localcable.player import (
+    MPV_SCRIPT,
+    SHOW_GUIDE_HELPER,
     MpvController,
     MpvNotFoundError,
     build_mpv_argv,
@@ -27,6 +29,9 @@ def test_build_argv_plays_path_from_beginning(tmp_path: Path):
     assert argv[-1] == str(media)
     assert "--" in argv
     assert any(a.startswith("--input-ipc-server=") for a in argv)
+    assert any(a == f"--script={MPV_SCRIPT}" for a in argv)
+    assert "--osc=no" in argv
+    assert "--osd-bar=no" in argv
     for arg in argv:
         if arg.startswith("--start="):
             assert arg in {"--start=0", "--start=0%"}
@@ -65,6 +70,7 @@ def test_play_from_beginning_spawn_argv(tmp_path: Path):
     assert argv[0].endswith("mpv")
     assert argv[-1] == str(media.resolve())
     assert "--fullscreen" in argv
+    assert any(a == f"--script={MPV_SCRIPT}" for a in argv)
     assert result.path == str(media.resolve())
     assert ["loadfile", result.path, "replace"] in result.ipc_commands
     assert ["seek", 0, "absolute"] in result.ipc_commands
@@ -141,3 +147,42 @@ def test_mpv_missing_still_exposes_argv(tmp_path: Path):
     assert caught.value.path == str(media.resolve())
     assert caught.value.argv[-1] == str(media.resolve())
     assert caught.value.argv[0] == "mpv"
+
+
+def test_spawn_passes_guide_env_and_does_not_alter_window(tmp_path: Path):
+    media = tmp_path / "show.mp4"
+    media.write_bytes(b"x")
+    recorded_env: list[dict] = []
+
+    class Proc:
+        def poll(self):
+            return None
+
+    def popen(argv, **kwargs):
+        recorded_env.append(kwargs.get("env") or {})
+        return Proc()
+
+    player = MpvController(
+        tmp_path / "mpv.sock",
+        extra_args=["--fullscreen"],
+        popen=popen,
+        which=lambda _n: "/usr/bin/mpv",
+        guide_url="http://127.0.0.1:9191",
+    )
+    player.play_file(media)
+    assert recorded_env
+    env = recorded_env[0]
+    assert env["LOCALCABLE_GUIDE_URL"] == "http://127.0.0.1:9191"
+    assert env["LOCALCABLE_SHOW_GUIDE"] == str(SHOW_GUIDE_HELPER)
+    assert Path(env["LOCALCABLE_SHOW_GUIDE"]).is_file()
+    assert MPV_SCRIPT.is_file()
+    lua = MPV_SCRIPT.read_text(encoding="utf-8")
+    assert "localcable-show-guide" in lua
+    assert '"esc"' in lua
+    assert "commandv" in lua and '"run"' in lua
+    assert "create_osd_overlay" in lua
+    assert "localcable-info" in lua
+    assert "CHANNEL_UP" in lua
+    esc_fn = lua.split("local function show_guide")[1].split("local function aesc")[0]
+    assert "quit" not in esc_fn
+    assert "fullscreen" not in esc_fn

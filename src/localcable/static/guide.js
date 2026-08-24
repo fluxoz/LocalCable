@@ -20,9 +20,12 @@
   var state = {
     schedule: null,
     selectedId: null,
+    selectedChannel: null,
     programs: {},
     scrollEl: null,
     clockOffsetMs: 0,
+    digitBuf: "",
+    digitTimer: null,
   };
 
   function $(id) {
@@ -105,47 +108,238 @@
       });
     }
     if (typeof document !== "undefined") {
-      document.addEventListener("keydown", onKey);
+      document.addEventListener("keydown", onKey, true);
     }
   }
 
+  function isGuideKey(key) {
+    return (
+      key === "Escape" ||
+      key === "Esc" ||
+      key === "GoBack" ||
+      key === "BrowserBack" ||
+      key === "Backspace" ||
+      key === "MediaGuide" ||
+      key === "Guide" ||
+      key === "ContextMenu" ||
+      key === "Home"
+    );
+  }
+
+  function isOkKey(key) {
+    return key === "Enter" || key === " " || key === "Spacebar" || key === "Space" || key === "Select";
+  }
+
+  function isInfoKey(key) {
+    return key === "i" || key === "I" || key === "Info" || key === "F1";
+  }
+
+  function digitFromKey(key, code) {
+    if (key && key.length === 1 && key >= "0" && key <= "9") return key;
+    if (key && key.indexOf("Digit") === 0 && key.length === 6) return key.slice(5);
+    if (code && code.indexOf("Digit") === 0 && code.length === 6) return code.slice(5);
+    if (code && code.indexOf("Numpad") === 0 && code.length === 7 && code.charAt(6) >= "0" && code.charAt(6) <= "9") {
+      return code.charAt(6);
+    }
+    return null;
+  }
+
   function onKey(event) {
-    if (!state.schedule || !state.selectedId) return;
-    var selected = state.programs[state.selectedId];
-    if (!selected) return;
     var key = event.key;
-    if (key === "Enter") {
+    if (isGuideKey(key)) {
       event.preventDefault();
-      playProgram(state.selectedId);
+      if (typeof event.stopPropagation === "function") event.stopPropagation();
+      returnToGuide();
+      return;
+    }
+    var digit = digitFromKey(key, event.code);
+    if (digit) {
+      event.preventDefault();
+      typeChannelDigit(digit);
+      return;
+    }
+    if (!state.schedule) return;
+    if (isOkKey(key)) {
+      event.preventDefault();
+      if (state.digitBuf) {
+        commitChannelDigits();
+        return;
+      }
+      if (state.selectedId) playProgram(state.selectedId);
+      return;
+    }
+    if (isInfoKey(key)) {
+      event.preventDefault();
+      if (typeof fetch === "function") {
+        fetch("/api/remote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "info" }),
+        }).catch(function () {});
+      }
       return;
     }
     var channels = state.schedule.channels || [];
-    var chIndex = -1;
-    var pIndex = -1;
-    for (var c = 0; c < channels.length; c += 1) {
-      var programs = channels[c].programs || [];
-      for (var p = 0; p < programs.length; p += 1) {
-        if (programs[p].id === state.selectedId) {
-          chIndex = c;
-          pIndex = p;
-        }
-      }
+    if (!channels.length) return;
+    var chIndex = currentChannelIndex(channels);
+    if (key === "ChannelUp" || key === "PageUp") {
+      event.preventDefault();
+      if (channels[chIndex + 1]) focusChannel(channels[chIndex + 1]);
+      else if (channels[0]) focusChannel(channels[0]);
+      return;
+    }
+    if (key === "ChannelDown" || key === "PageDown") {
+      event.preventDefault();
+      if (channels[chIndex - 1]) focusChannel(channels[chIndex - 1]);
+      else if (channels[channels.length - 1]) focusChannel(channels[channels.length - 1]);
+      return;
     }
     if (chIndex < 0) return;
-    var next = null;
-    if (key === "ArrowRight") {
-      next = channels[chIndex].programs[pIndex + 1];
-    } else if (key === "ArrowLeft") {
-      next = channels[chIndex].programs[pIndex - 1];
-    } else if (key === "ArrowDown" && channels[chIndex + 1]) {
-      next = programAt(channels[chIndex + 1], parseTime(selected.start_time));
-    } else if (key === "ArrowUp" && channels[chIndex - 1]) {
-      next = programAt(channels[chIndex - 1], parseTime(selected.start_time));
+    var selected = state.selectedId ? state.programs[state.selectedId] : null;
+    var pIndex = -1;
+    if (selected) {
+      var programs = channels[chIndex].programs || [];
+      for (var p = 0; p < programs.length; p += 1) {
+        if (programs[p].id === state.selectedId) pIndex = p;
+      }
     }
-    if (next) {
+    if (key === "ArrowRight" && pIndex >= 0 && channels[chIndex].programs[pIndex + 1]) {
       event.preventDefault();
-      selectProgram(next.id);
+      selectProgram(channels[chIndex].programs[pIndex + 1].id);
+      return;
     }
+    if (key === "ArrowLeft" && pIndex > 0) {
+      event.preventDefault();
+      selectProgram(channels[chIndex].programs[pIndex - 1].id);
+      return;
+    }
+    if (key === "ArrowDown" && channels[chIndex + 1]) {
+      event.preventDefault();
+      focusChannel(channels[chIndex + 1], selected ? parseTime(selected.start_time) : nowMs());
+      return;
+    }
+    if (key === "ArrowUp" && channels[chIndex - 1]) {
+      event.preventDefault();
+      focusChannel(channels[chIndex - 1], selected ? parseTime(selected.start_time) : nowMs());
+    }
+  }
+
+  function currentChannelIndex(channels) {
+    var number = state.selectedChannel;
+    if (number == null && state.selectedId && state.programs[state.selectedId]) {
+      number = state.programs[state.selectedId].channel_number;
+    }
+    if (number == null) return 0;
+    for (var i = 0; i < channels.length; i += 1) {
+      if (channels[i].number === number) return i;
+    }
+    return 0;
+  }
+
+  function matchChannelBuf(buf) {
+    var channels = (state.schedule && state.schedule.channels) || [];
+    if (!buf || !channels.length) return null;
+    var typed = parseInt(buf, 10);
+    if (isNaN(typed)) return null;
+    var prefixes = [];
+    for (var i = 0; i < channels.length; i += 1) {
+      if (channels[i].number === typed) return channels[i];
+      if (String(channels[i].number).indexOf(buf) === 0) prefixes.push(channels[i]);
+    }
+    if (prefixes.length === 1) return prefixes[0];
+    var closest = channels[0];
+    var best = Math.abs(channels[0].number - typed);
+    for (var c = 1; c < channels.length; c += 1) {
+      var d = Math.abs(channels[c].number - typed);
+      if (d < best) {
+        best = d;
+        closest = channels[c];
+      }
+    }
+    return closest;
+  }
+
+  function maxChannelDigits() {
+    var channels = (state.schedule && state.schedule.channels) || [];
+    var width = 1;
+    for (var i = 0; i < channels.length; i += 1) {
+      var n = String(channels[i].number).length;
+      if (n > width) width = n;
+    }
+    return width;
+  }
+
+  function typeChannelDigit(digit) {
+    state.digitBuf += digit;
+    if (state.digitTimer && typeof clearTimeout === "function") clearTimeout(state.digitTimer);
+    var status = $("footer-status");
+    if (status) status.textContent = "Channel " + state.digitBuf;
+    var hit = matchChannelBuf(state.digitBuf);
+    if (hit) focusChannel(hit);
+    if (state.digitBuf.length >= maxChannelDigits()) {
+      commitChannelDigits();
+      return;
+    }
+    if (typeof setTimeout === "function") {
+      state.digitTimer = setTimeout(commitChannelDigits, 1400);
+    }
+  }
+
+  function commitChannelDigits() {
+    if (state.digitTimer && typeof clearTimeout === "function") clearTimeout(state.digitTimer);
+    state.digitTimer = null;
+    var buf = state.digitBuf;
+    state.digitBuf = "";
+    if (!buf) return;
+    var hit = matchChannelBuf(buf);
+    if (hit) focusChannel(hit);
+  }
+
+  function highlightChannel(number) {
+    state.selectedChannel = number;
+    var cells = typeof document !== "undefined" ? document.querySelectorAll(".channel-cell.selected") : [];
+    for (var i = 0; i < cells.length; i += 1) cells[i].classList.remove("selected");
+    var cell = typeof document !== "undefined" ? document.querySelector('.channel-cell[data-channel="' + number + '"]') : null;
+    if (cell) {
+      cell.classList.add("selected");
+      if (typeof cell.scrollIntoView === "function") cell.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function selectEmptyChannel(channel) {
+    state.selectedId = null;
+    highlightChannel(channel.number);
+    var blocks = typeof document !== "undefined" ? document.querySelectorAll(".program.selected") : [];
+    for (var i = 0; i < blocks.length; i += 1) blocks[i].classList.remove("selected");
+    var title = $("detail-title");
+    var chEl = $("detail-channel");
+    var rating = $("detail-rating");
+    var time = $("detail-time");
+    var desc = $("detail-description");
+    var play = $("play-button");
+    if (title) title.textContent = channel.name || "No programming";
+    if (chEl) chEl.textContent = channel.number != null ? channel.number + " " + (channel.name || "") : channel.name || "";
+    if (rating) rating.textContent = "";
+    if (time) time.textContent = "";
+    if (desc) desc.textContent = "No programming";
+    if (play) play.disabled = true;
+    var status = $("footer-status");
+    if (status) status.textContent = "Channel " + channel.number;
+    showArt(channel.number != null ? "/art/channel/" + channel.number : "");
+    if (typeof fetch === "function") {
+      fetch("/api/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: channel.number }),
+      }).catch(function () {});
+    }
+  }
+
+  function focusChannel(channel, atMs) {
+    if (!channel) return;
+    var hit = programAt(channel, atMs != null ? atMs : nowMs());
+    if (hit) selectProgram(hit.id);
+    else selectEmptyChannel(channel);
   }
 
   function programAt(channel, ms) {
@@ -204,7 +398,7 @@
     if (!channels.length) {
       var empty = document.createElement("div");
       empty.className = "empty-guide";
-      empty.textContent = "No channels found. Add subfolders with video files to the media root.";
+      empty.textContent = "No channels found. Add subfolders to the media root (videos optional).";
       grid.appendChild(empty);
       return;
     }
@@ -235,6 +429,15 @@
       row.style.width = metrics.width + "px";
       row.style.backgroundImage = stripe;
       var programs = channel.programs || [];
+      if (!programs.length) {
+        var placeholder = document.createElement("div");
+        placeholder.className = "program no-media";
+        placeholder.setAttribute("data-channel", String(channel.number));
+        placeholder.style.left = "0px";
+        placeholder.style.width = metrics.width + "px";
+        placeholder.textContent = "No programming";
+        row.appendChild(placeholder);
+      }
       for (var p = 0; p < programs.length; p += 1) {
         var program = programs[p];
         state.programs[program.id] = program;
@@ -294,23 +497,22 @@
 
   function selectDefault(schedule) {
     var channels = schedule.channels || [];
+    if (!channels.length) return;
     var now = nowMs();
     for (var i = 0; i < channels.length; i += 1) {
-      var hit = programAt(channels[i], now);
-      if (hit) {
-        selectProgram(hit.id);
+      if (programAt(channels[i], now) || !(channels[i].programs || []).length) {
+        focusChannel(channels[i], now);
         return;
       }
     }
-    if (channels[0] && channels[0].programs && channels[0].programs[0]) {
-      selectProgram(channels[0].programs[0].id);
-    }
+    focusChannel(channels[0], now);
   }
 
   function selectProgram(id) {
     var program = (state.programs && state.programs[id]) || findProgram(id);
     if (!program) return;
     state.selectedId = id;
+    if (program.channel_number != null) highlightChannel(program.channel_number);
     var blocks = typeof document !== "undefined" ? document.querySelectorAll(".program.selected") : [];
     for (var i = 0; i < blocks.length; i += 1) {
       blocks[i].classList.remove("selected");
@@ -337,6 +539,14 @@
     if (play) play.disabled = false;
     var status = $("footer-status");
     if (status) status.textContent = "Selected: " + program.title;
+    showArt(program.art || "/art/" + id);
+    if (typeof fetch === "function") {
+      fetch("/api/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ program_id: id }),
+      }).catch(function () {});
+    }
     return program;
   }
 
@@ -354,6 +564,56 @@
       }
     }
     return null;
+  }
+
+  function showArt(url) {
+    var img = $("detail-art");
+    var ph = document.querySelector(".thumb-placeholder");
+    var overlay = $("video-overlay");
+    var live = overlay && !overlay.hidden;
+    if (!img) return;
+    img.onload = null;
+    img.onerror = null;
+    if (!url) {
+      img.removeAttribute("src");
+      img.hidden = true;
+      if (ph && !live) ph.hidden = false;
+      return;
+    }
+    img.onload = function () {
+      img.hidden = false;
+      if (ph) ph.hidden = true;
+    };
+    img.onerror = function () {
+      img.hidden = true;
+      if (ph && !live) ph.hidden = false;
+    };
+    img.src = url;
+  }
+
+  function showVideoOverlay(program) {
+    var overlay = $("video-overlay");
+    if (!overlay || !program) return;
+    overlay.hidden = false;
+    var ph = document.querySelector(".thumb-placeholder");
+    if (ph) ph.hidden = true;
+    var title = $("video-overlay-title");
+    var channel = $("video-overlay-channel");
+    if (title) title.textContent = program.title || "";
+    if (channel) {
+      var chName = program.channel_name || "";
+      var chNum = program.channel_number;
+      channel.textContent = chNum != null && chNum !== "" ? chNum + " " + chName : chName;
+    }
+    var thumb = $("detail-thumb");
+    if (thumb) thumb.classList.add("is-live");
+  }
+
+  function returnToGuide() {
+    var status = $("footer-status");
+    if (status) status.textContent = "Guide";
+    if (typeof fetch !== "function") return;
+    fetch("/api/show-guide", { method: "POST" }).catch(function () {});
   }
 
   function playProgram(id) {
@@ -376,6 +636,7 @@
         if (!status) return;
         if (result.body && result.body.ok) {
           status.textContent = "Playing in mpv: " + program.title;
+          showVideoOverlay(program);
         } else {
           var err = (result.body && (result.body.error || result.body.detail)) || "playback failed";
           status.textContent = "Could not play (" + err + ")";
@@ -430,6 +691,27 @@
     grid.appendChild(empty);
   }
 
+  function applyUi(ui) {
+    var label = $("header-label");
+    if (!label || !ui) return;
+    var banner = ui.banner;
+    if (banner == null) return;
+    banner = String(banner);
+    label.textContent = banner;
+    if (banner === "TV Listings") label.classList.add("with-mail");
+    else label.classList.remove("with-mail");
+  }
+
+  function loadUi() {
+    if (typeof fetch !== "function") return;
+    fetch("/api/ui")
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
+      .then(applyUi)
+      .catch(function () {});
+  }
+
   function loadSchedule() {
     if (typeof fetch !== "function") return;
     fetch("/api/schedule")
@@ -459,15 +741,24 @@
     if (state.root) bindControls();
     tick();
     var skipAuto = global.LocalCableSkipAutoLoad === true;
-    if (typeof fetch === "function" && !skipAuto) loadSchedule();
+    if (typeof fetch === "function" && !skipAuto) {
+      loadUi();
+      loadSchedule();
+    }
     if (typeof setInterval === "function") setInterval(tick, 1000);
   }
 
   global.LocalCableGuide = {
     init: init,
+    applyUi: applyUi,
     render: render,
     selectProgram: selectProgram,
     playProgram: playProgram,
+    showArt: showArt,
+    showVideoOverlay: showVideoOverlay,
+    returnToGuide: returnToGuide,
+    focusChannel: focusChannel,
+    typeChannelDigit: typeChannelDigit,
     getState: function () {
       return state;
     },
