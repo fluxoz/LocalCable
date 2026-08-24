@@ -1,17 +1,19 @@
-"""CRT / VHS look for mpv: ntsc-rs (frei0r) when present, else a 480p analog chain.
+"""CRT / VHS look for mpv: vendored ntsc-rs (frei0r), else a 480p analog chain.
 
 https://ntsc.rs/  — authentic NTSC/VHS via the ntscrs frei0r plugin + JSON presets.
-Without that plugin, LocalCable still applies a scanline / chroma-noise approximation
-so the option works out of the box.
+The plugin is shipped under vendor/ntscrs/. If this CPU/OS has no binary, LocalCable
+still applies a scanline / chroma-noise approximation so the option works.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PRESETS_DIR = PACKAGE_DIR / "presets"
+VENDOR_FREI0R = PACKAGE_DIR / "vendor" / "ntscrs" / "frei0r"
 
 LAVFI_NTSC = (
     "scale=-2:480:flags=lanczos,"
@@ -30,7 +32,13 @@ LAVFI_VHS = (
     "drawgrid=w=iw:h=2:t=1:c=black@0.18"
 )
 
-FREI0R_NAMES = ("libntscrs.so", "ntscrs.so", "libntscrs.dylib", "ntscrs.dylib")
+FREI0R_NAMES = (
+    "ntscrs.so",
+    "libntscrs.so",
+    "ntscrs.dylib",
+    "libntscrs.dylib",
+    "ntscrs.dll",
+)
 
 
 def normalize_filter(value: object, default: str = "off") -> str:
@@ -44,10 +52,34 @@ def normalize_filter(value: object, default: str = "off") -> str:
     return default if default in {"off", "ntsc", "vhs"} else "off"
 
 
+def _vendor_plugin_dirs() -> list[Path]:
+    """Shipped ntscrs binaries for this OS/CPU, then any other vendored copies."""
+    system = sys.platform
+    machine = os.uname().machine.lower() if hasattr(os, "uname") else ""
+    preferred: list[Path] = []
+    if system.startswith("linux"):
+        if machine in {"x86_64", "amd64"}:
+            preferred.append(VENDOR_FREI0R / "linux-x86_64")
+        elif machine in {"aarch64", "arm64"}:
+            preferred.append(VENDOR_FREI0R / "linux-aarch64")
+    elif system == "darwin":
+        if machine in {"arm64", "aarch64"}:
+            preferred.append(VENDOR_FREI0R / "macos-arm64")
+        preferred.append(VENDOR_FREI0R / "macos-x86_64")
+        preferred.append(VENDOR_FREI0R / "macos-arm64")
+    elif system.startswith("win"):
+        preferred.append(VENDOR_FREI0R / "windows-x86_64")
+    extra = []
+    if VENDOR_FREI0R.is_dir():
+        extra = [p for p in sorted(VENDOR_FREI0R.iterdir()) if p.is_dir() and p not in preferred]
+    return preferred + extra
+
+
 def find_frei0r_ntscrs(
     environ: dict[str, str] | None = None,
     *,
     include_system: bool = True,
+    include_vendor: bool = True,
 ) -> Path | None:
     env = environ if environ is not None else os.environ
     dirs: list[Path] = []
@@ -55,6 +87,8 @@ def find_frei0r_ntscrs(
     for part in raw.split(":"):
         if part.strip():
             dirs.append(Path(part.strip()))
+    if include_vendor:
+        dirs.extend(_vendor_plugin_dirs())
     if include_system:
         dirs.extend(
             [
@@ -66,7 +100,15 @@ def find_frei0r_ntscrs(
                 Path("/usr/lib/aarch64-linux-gnu/frei0r-1"),
             ]
         )
+    seen: set[Path] = set()
     for folder in dirs:
+        try:
+            resolved = folder.resolve()
+        except OSError:
+            resolved = folder
+        if resolved in seen:
+            continue
+        seen.add(resolved)
         if not folder.is_dir():
             continue
         for name in FREI0R_NAMES:
@@ -93,7 +135,11 @@ def lavfi_graph(
     """libavfilter graph: real ntsc-rs via frei0r, else a built-in analog chain."""
     if mode not in {"ntsc", "vhs"}:
         return ""
-    plugin = find_frei0r_ntscrs(environ, include_system=include_system)
+    plugin = find_frei0r_ntscrs(
+        environ,
+        include_system=include_system,
+        include_vendor=include_system,
+    )
     preset = preset_path(mode, explicit_preset)
     if plugin is not None and preset.is_file():
         return f"scale=-2:480:flags=lanczos,frei0r=ntscrs:{preset}"

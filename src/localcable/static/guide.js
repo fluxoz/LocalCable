@@ -33,11 +33,17 @@
     dashPlayer: null,
     playerMode: "browser",
     startFrom: "live",
+    crtOn: false,
+    crtMode: "vhs",
+    inpageFilter: "css",
+    streamFilter: "off",
     packagedFrom: 0,
     programDuration: 0,
     hudTimer: null,
     hudPinned: false,
     seeking: false,
+    previewId: null,
+    previewTimer: null,
   };
 
   function $(id) {
@@ -173,6 +179,16 @@
     for (var i = 0; i < map.length; i += 1) {
       var el = $(map[i][0]);
       if (el) el.addEventListener("click", map[i][1]);
+    }
+    var crt = $("hud-crt");
+    if (crt) {
+      crt.checked = !!state.crtOn;
+      crt.addEventListener("change", function () {
+        state.crtOn = !!crt.checked;
+        showHud();
+        if (state.inpageFilter === "ntscrs") reloadStreamKeepingTime();
+        else applyCrtClass();
+      });
     }
     var seek = $("hud-seek");
     if (seek) {
@@ -525,6 +541,7 @@
     var status = $("footer-status");
     if (status) status.textContent = "Channel " + channel.number;
     showArt(channel.number != null ? "/art/channel/" + channel.number : "");
+    cancelPreview();
     if (typeof fetch === "function") {
       fetch("/api/select", {
         method: "POST",
@@ -767,6 +784,7 @@
     if (status) status.textContent = "Selected: " + program.title;
     showArt(program.art || "/art/" + id);
     scrollProgramIntoView(id);
+    schedulePreview(program);
     if (typeof fetch === "function") {
       fetch("/api/select", {
         method: "POST",
@@ -869,6 +887,7 @@
     if (state.watching) {
       stage.classList.add("is-full");
       stage.removeAttribute("style");
+      applyCrtClass();
       return;
     }
     stage.classList.remove("is-full");
@@ -880,24 +899,33 @@
     stage.style.width = r.width + "px";
     stage.style.height = r.height + "px";
     stage.style.zIndex = "6";
+    applyCrtClass();
   }
 
   function enterWatching(program) {
     state.watching = true;
+    var video = $("player");
+    if (video) video.muted = false;
     if (typeof document !== "undefined" && document.body) {
       document.body.classList.add("watching");
     }
     fillHudCopy(program || currentProgram());
+    var badge = $("video-overlay-live");
+    if (badge) badge.textContent = "On now";
     showHud();
     parkStage();
   }
 
   function leaveWatching() {
     state.watching = false;
+    var video = $("player");
+    if (video) video.muted = true;
     if (typeof document !== "undefined" && document.body) {
       document.body.classList.remove("watching");
     }
     hideHud(true);
+    var badge = $("video-overlay-live");
+    if (badge && state.dashOn) badge.textContent = "Preview";
     parkStage();
     if (typeof document !== "undefined" && document.fullscreenElement && typeof document.exitFullscreen === "function") {
       document.exitFullscreen().catch(function () {});
@@ -1013,8 +1041,85 @@
     var status = $("footer-status");
     if (status) status.textContent = "Guide";
     parkStage();
+  }
+
+  function cancelPreview() {
+    if (state.previewTimer && typeof clearTimeout === "function") clearTimeout(state.previewTimer);
+    state.previewTimer = null;
+    if (state.watching) return;
+    state.previewId = null;
+    if (!state.dashOn) return;
+    var video = $("player");
+    if (video) {
+      try {
+        video.pause();
+      } catch (err) {}
+    }
+    state.dashOn = false;
+    parkStage();
+  }
+
+  function schedulePreview(program) {
+    if (state.watching || !program) return;
+    if (state.previewId === program.id && state.dashOn) return;
+    if (state.previewTimer && typeof clearTimeout === "function") clearTimeout(state.previewTimer);
+    if (typeof setTimeout !== "function") {
+      loadPreview(program);
+      return;
+    }
+    state.previewTimer = setTimeout(function () {
+      loadPreview(program);
+    }, 400);
+  }
+
+  function applyStreamBody(program, body, muted) {
+    state.dashOn = true;
+    state.programDuration = Number(body.duration_seconds || program.duration_seconds || 0);
+    state.packagedFrom = body.packaged_from_offset ? Number(body.offset_seconds || 0) : 0;
+    state.streamFilter = body.filter || activeFilter();
+    var box = $("hud-crt");
+    if (box && state.inpageFilter === "ntscrs") box.checked = state.streamFilter !== "off";
+    var video = $("player");
+    if (video) video.muted = !!muted;
+    var stage = $("stage");
+    if (stage) {
+      stage.hidden = false;
+      stage.classList.add("is-on");
+    }
+    if (body.protocol === "file" && body.url) {
+      attachFile(body.url, body.offset_seconds || 0);
+    } else {
+      var seek = body.packaged_from_offset ? 0 : Number(body.offset_seconds || 0);
+      attachDash(body.manifest || body.url, seek);
+    }
+    showVideoOverlay(program);
+    var badge = $("video-overlay-live");
+    if (badge) badge.textContent = state.watching ? "On now" : "Preview";
+    parkStage();
+    applyCrtClass();
+  }
+
+  function loadPreview(program) {
+    if (!program || state.watching) return;
+    if (state.previewId === program.id && state.dashOn) return;
+    state.previewId = program.id;
     if (typeof fetch !== "function") return;
-    fetch("/api/show-guide", { method: "POST" }).catch(function () {});
+    fetch("/api/preview/" + encodeURIComponent(program.id))
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
+      .then(function (body) {
+        if (state.watching) return;
+        if (!state.selectedId || state.selectedId !== program.id) return;
+        if (!body || !body.ok) return;
+        if (body.protocol === "file" && body.url) {
+          body.offset_seconds = liveOffset(program);
+          applyStreamBody(program, body, true);
+          return;
+        }
+        showArt(body.art || program.art || "/art/" + program.id);
+      })
+      .catch(function () {});
   }
 
   function playMpv(id, fromStart) {
@@ -1092,13 +1197,53 @@
     syncHudButtons();
   }
 
-  function startDash(program, fromStart) {
+  function activeFilter() {
+    if (!state.crtOn) return "off";
+    if (state.inpageFilter === "ntscrs") return state.crtMode || "vhs";
+    return "off";
+  }
+
+  function applyCrtClass() {
+    var stage = $("stage");
+    if (!stage) return;
+    stage.classList.remove("crt-ntsc", "crt-vhs");
+    if (!state.crtOn || state.inpageFilter === "ntscrs") return;
+    if (state.inpageFilter === "off") return;
+    stage.classList.add(state.crtMode === "ntsc" ? "crt-ntsc" : "crt-vhs");
+  }
+
+  function streamPayload(program, fromStart, startSeconds) {
+    var body = {
+      program_id: program.id,
+      from_start: !!fromStart,
+      filter: activeFilter(),
+    };
+    if (startSeconds != null && startSeconds > 0) {
+      body.from_start = false;
+      body.start_seconds = startSeconds;
+    }
+    return body;
+  }
+
+  function playbackClockSeconds() {
+    var video = $("player");
+    var cur = (video && video.currentTime) || 0;
+    return (state.packagedFrom || 0) + cur;
+  }
+
+  function reloadStreamKeepingTime() {
+    var program = currentProgram();
+    if (!program || !state.dashOn) return;
+    startDash(program, false, playbackClockSeconds());
+  }
+
+  function startDash(program, fromStart, startSeconds) {
     var status = $("footer-status");
     if (typeof fetch !== "function") return;
     fetch("/api/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ program_id: program.id, from_start: !!fromStart }),
+      body: JSON.stringify(streamPayload(program, fromStart, startSeconds)),
     })
       .then(function (res) {
         return res.json().then(function (body) {
@@ -1117,17 +1262,7 @@
           stage.hidden = false;
           stage.classList.add("is-on");
         }
-        var body = result.body;
-        state.programDuration = Number(body.duration_seconds || program.duration_seconds || 0);
-        state.packagedFrom = body.packaged_from_offset ? Number(body.offset_seconds || 0) : 0;
-        if (body.protocol === "file" && body.url) {
-          attachFile(body.url, body.offset_seconds || 0);
-        } else {
-          var seek = body.packaged_from_offset ? 0 : Number(body.offset_seconds || 0);
-          attachDash(body.manifest || body.url, seek);
-        }
-        showVideoOverlay(program);
-        parkStage();
+        applyStreamBody(program, result.body, false);
         if (status) status.textContent = "Playing: " + program.title;
       })
       .catch(function (err) {
@@ -1146,7 +1281,16 @@
     if (usesBrowser()) {
       enterWatching(program);
       if (status) status.textContent = "Playing: " + program.title;
-      startDash(program, fromStart);
+      if (!fromStart && state.previewId === id && state.dashOn && state.streamFilter === activeFilter()) {
+        var video = $("player");
+        if (video) {
+          video.muted = false;
+          video.play().catch(function () {});
+        }
+        parkStage();
+      } else {
+        startDash(program, fromStart);
+      }
       if (usesMpv()) playMpv(id, fromStart);
       return;
     }
@@ -1235,6 +1379,19 @@
     }
     if (ui.player) state.playerMode = String(ui.player);
     if (ui.start_from) state.startFrom = String(ui.start_from);
+    if (ui.inpage_filter) state.inpageFilter = String(ui.inpage_filter);
+    if (ui.filter) {
+      var mode = String(ui.filter);
+      if (mode === "ntsc" || mode === "vhs") {
+        state.crtMode = mode;
+        state.crtOn = true;
+      } else {
+        state.crtOn = false;
+      }
+      var box = $("hud-crt");
+      if (box) box.checked = !!state.crtOn;
+      applyCrtClass();
+    }
   }
 
   function loadUi() {
@@ -1287,6 +1444,7 @@
     playProgram: playProgram,
     restartFromBeginning: restartFromBeginning,
     liveOffset: liveOffset,
+    schedulePreview: schedulePreview,
     showArt: showArt,
     showVideoOverlay: showVideoOverlay,
     returnToGuide: returnToGuide,

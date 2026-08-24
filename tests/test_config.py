@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from localcable.config import banner_text, load_config, normalize_player, normalize_start_from
+from localcable.config import (
+    banner_text,
+    load_config,
+    normalize_inpage_filter,
+    normalize_player,
+    normalize_start_from,
+)
 
 
 def test_load_yaml_settings(tmp_path: Path):
@@ -55,6 +61,7 @@ def test_libraries_and_browser_player_from_yaml(tmp_path: Path):
                 "    kind: movies",
                 "library:",
                 "  auto_organize: true",
+                "  min_channels: 24",
                 f"  inbox: {tmp_path / 'inbox'}",
                 "playback:",
                 "  player: browser",
@@ -66,6 +73,7 @@ def test_libraries_and_browser_player_from_yaml(tmp_path: Path):
     config = load_config(settings)
     assert [lib.kind for lib in config.libraries] == ["tv", "movies"]
     assert config.library.auto_organize is True
+    assert config.library.min_channels == 24
     assert config.library.inbox == tmp_path / "inbox"
     assert config.playback.player == "browser"
     assert config.media_roots == [tmp_path / "Shows", tmp_path / "Movies"]
@@ -94,6 +102,26 @@ def test_lineup_names_from_yaml(tmp_path: Path):
     assert config.lineup.names["Thunderbolt"] == "TNT"
     assert config.lineup.fallback == "WXYZ 8"
     assert config.playback.start_from == "live"
+
+
+def test_example_settings_keep_crt_under_playback():
+    settings = Path(__file__).resolve().parents[1] / "example" / "settings.yaml"
+    text = settings.read_text(encoding="utf-8")
+    playback = text.split("playback:", 1)[1].split("\nlineup:", 1)[0]
+    lineup = text.split("\nlineup:", 1)[1].split("\nui:", 1)[0]
+    assert "inpage_filter:" in playback
+    assert "filter:" in playback
+    assert "inpage_filter:" not in lineup
+    config = load_config(settings)
+    assert config.playback.inpage_filter == "css"
+    assert config.playback.filter == "off"
+
+
+def test_normalize_inpage_filter():
+    assert normalize_inpage_filter("css") == "css"
+    assert normalize_inpage_filter("fast") == "css"
+    assert normalize_inpage_filter("ntscrs") == "ntscrs"
+    assert normalize_inpage_filter("off") == "off"
 
 
 def test_normalize_start_from():

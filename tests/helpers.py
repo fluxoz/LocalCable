@@ -14,6 +14,7 @@ def make_video(
     *,
     title: str | None = None,
     color: str = "blue",
+    codec: str = "mpeg4",
 ) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -25,9 +26,13 @@ def make_video(
         "-i",
         f"color=c={color}:s=16x16:d={duration}:r=2",
         "-c:v",
-        "mpeg4",
-        "-q:v",
-        "12",
+        codec,
+    ]
+    if codec in {"libx264", "h264"}:
+        cmd += ["-pix_fmt", "yuv420p", "-preset", "ultrafast"]
+    else:
+        cmd += ["-q:v", "12"]
+    cmd += [
         "-an",
         "-t",
         str(duration),

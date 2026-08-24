@@ -26,6 +26,9 @@ class MediaFile:
     rating: str | None = None
     genre: str | None = None
     year: str | None = None
+    video_codec: str | None = None
+    audio_codec: str | None = None
+    mse_copy: bool | None = None
 
 
 @dataclass
@@ -51,6 +54,7 @@ class ScheduledProgram:
     end_time: datetime
     channel_number: int
     channel_name: str
+    mse_copy: bool | None = None
 
     def to_dict(self) -> dict:
         return {

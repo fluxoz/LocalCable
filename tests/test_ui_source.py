@@ -29,6 +29,7 @@ def test_html_has_guide_landmarks():
         'id="player"',
         'id="hud"',
         'id="hud-restart"',
+        'id="hud-crt"',
         'id="stage"',
         "TV Listings",
         "/static/vendor/dash.all.min.js",
@@ -55,6 +56,8 @@ def test_css_has_layout_hooks():
         ".with-mail",
         "#stage",
         "#hud",
+        "#hud-crt-label",
+        ".crt-vhs",
         "#player",
         "body.watching",
     ):
@@ -73,8 +76,12 @@ def test_js_is_browser_script_without_node_modules():
     assert "selectProgram" in js
     assert "now-line" in js
     assert "Escape" in js
-    assert "/api/show-guide" in js
     assert "returnToGuide" in js
+    assert "schedulePreview" in js
+    assert "loadPreview" in js
+    on_return = js.split("function returnToGuide", 1)[1].split("function cancelPreview", 1)[0]
+    assert "/api/show-guide" not in on_return
+    assert "leaveWatching" in on_return
     assert "No programming" in js
     assert "no-media" in js
     assert "showVideoOverlay" in js
@@ -94,6 +101,10 @@ def test_js_is_browser_script_without_node_modules():
     assert "restartFromBeginning" in js
     assert "liveOffset" in js
     assert "from_start" in js
+    assert "hud-crt" in js
+    assert "activeFilter" in js
+    assert "/api/preview/" in js
+    assert "applyCrtClass" in js
     on_key = js.split("function onKey", 1)[1].split("function currentChannelIndex", 1)[0]
     assert "isGuideKey" in on_key
     assert "playProgram" in on_key

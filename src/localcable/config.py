@@ -46,6 +46,7 @@ class PlaybackConfig:
     ipc_socket: str | None = None
     filter: str = "off"
     filter_preset: str | None = None
+    inpage_filter: str = "css"
 
 
 @dataclass
@@ -72,6 +73,7 @@ class LibraryConfig:
     inbox: Path | None = None
     fetch_metadata: bool = True
     auto_channels: bool = True
+    min_channels: int = 0
 
 
 @dataclass
@@ -173,6 +175,19 @@ def normalize_player(value: Any, default: str = DEFAULT_PLAYER) -> str:
         return "mpv"
     if text in {"both", "all"}:
         return "both"
+    return default
+
+
+def normalize_inpage_filter(value: Any, default: str = "css") -> str:
+    if value is None:
+        return default
+    text = str(value).strip().lower().replace("-", "_")
+    if text in {"css", "web", "gpu", "fast", "overlay"}:
+        return "css"
+    if text in {"ntscrs", "encode", "ffmpeg", "authentic", "server", "frei0r"}:
+        return "ntscrs"
+    if text in {"off", "none", "false", "0", "no"}:
+        return "off"
     return default
 
 
@@ -338,6 +353,7 @@ def load_config(
         ipc_socket=play_raw.get("ipc_socket"),
         filter=normalize_filter(play_raw.get("filter", "off")),
         filter_preset=str(preset) if preset else None,
+        inpage_filter=normalize_inpage_filter(play_raw.get("inpage_filter", "css")),
     )
     ui = UiConfig(
         theme=str(ui_raw.get("theme", "xfinity")),
@@ -361,6 +377,7 @@ def load_config(
         inbox=_as_path(inbox) if inbox else None,
         fetch_metadata=bool(lib_raw.get("fetch_metadata", True)),
         auto_channels=bool(auto_channels),
+        min_channels=max(0, int(lib_raw.get("min_channels", 0) or 0)),
     )
     lineup = _parse_lineup(lineup_raw)
     logo_filename = str(raw.get("logo", DEFAULT_LOGO_FILENAME))
