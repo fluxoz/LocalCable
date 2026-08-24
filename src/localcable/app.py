@@ -19,9 +19,12 @@ from pydantic import BaseModel, Field
 
 from localcable import __version__
 from localcable.artwork import resolve_artwork
-from localcable.config import DEFAULT_BANNER, AppConfig
+from localcable.config import DEFAULT_BANNER, AppConfig, normalize_start_from
+from localcable.dash import DashPackager, can_direct_play, mime_for
 from localcable.guide_focus import GUIDE_WINDOW_TITLE, focus_guide_window
+from localcable.jellyfin import scan_libraries
 from localcable.models import GuideSchedule, ScheduledProgram
+from localcable.organize import organize_library
 from localcable.osd import osd_payload_from_path, osd_payload_from_program, write_osd_state
 from localcable.player import MpvController, MpvNotFoundError, PlayResult, ipc_commands_for_play
 from localcable.remote import (
@@ -32,8 +35,8 @@ from localcable.remote import (
     start_evdev_listener,
     step_channel,
 )
-from localcable.scan import scan_media_root
 from localcable.schedule import generate_schedule
+from localcable.util import live_offset_seconds
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +57,8 @@ LOGO_MIME = {
 class PlayRequest(BaseModel):
     program_id: str | None = None
     path: str | None = Field(default=None, description="Absolute media path under a media root")
+    start_seconds: float | None = None
+    from_start: bool = False
 
 
 class RemoteRequest(BaseModel):
@@ -100,6 +105,8 @@ class AppState:
         rng: random.Random | None = None,
         focus_guide: Callable[..., Any] | None = None,
         artwork_opener: Callable[..., Any] | None = None,
+        packager: DashPackager | None = None,
+        organize_opener: Callable[..., Any] | None = None,
     ) -> None:
         self.config = config
         self.now_fn = now_fn or _now_local
@@ -116,6 +123,8 @@ class AppState:
         )
         self._focus_guide = focus_guide or focus_guide_window
         self._artwork_opener = artwork_opener
+        self._organize_opener = organize_opener
+        self.packager = packager or DashPackager(config.cache_dir)
         self.channels = []
         self.schedule: GuideSchedule | None = None
         self.programs_by_id: dict[str, ScheduledProgram] = {}
@@ -143,16 +152,21 @@ class AppState:
             ):
                 self.schedule.now = now
                 return self.schedule
-            channels = []
-            for root in self.config.media_roots:
-                channels.extend(
-                    scan_media_root(
-                        root,
-                        default_mode=self.config.schedule.default_mode,
-                        probe_runner=self.probe_runner,
-                        cache_dir=self.config.cache_dir,
-                    )
-                )
+            if self.config.library.auto_organize:
+                try:
+                    organize_library(self.config, opener=self._organize_opener)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("auto-organize failed: %s", exc)
+            channels = scan_libraries(
+                self.config.library_roots(),
+                default_mode=self.config.schedule.default_mode,
+                probe_runner=self.probe_runner,
+                cache_dir=self.config.cache_dir,
+                fetch_metadata=self.config.library.fetch_metadata,
+                opener=self._organize_opener or self._artwork_opener,
+                auto_channels=self.config.library.auto_channels,
+                lineup_config=self.config.lineup,
+            )
             self.channels = channels
             self.schedule = generate_schedule(
                 channels,
@@ -175,9 +189,39 @@ class AppState:
             )
             return self.schedule
 
-    def play(self, program_id: str | None = None, path: str | None = None) -> PlayResult:
+    def _play_offset(
+        self,
+        program: ScheduledProgram | None,
+        *,
+        from_start: bool = False,
+        start_seconds: float | None = None,
+    ) -> float:
+        if from_start:
+            return 0.0
+        if start_seconds is not None:
+            return max(0.0, float(start_seconds))
+        if program is None:
+            return 0.0
+        if normalize_start_from(self.config.playback.start_from) != "live":
+            return 0.0
+        return live_offset_seconds(
+            program.start_time,
+            self.now_fn(),
+            program.duration_seconds,
+            end=program.end_time,
+        )
+
+    def play(
+        self,
+        program_id: str | None = None,
+        path: str | None = None,
+        *,
+        from_start: bool = False,
+        start_seconds: float | None = None,
+    ) -> PlayResult:
         target: Path | None = None
         payload: dict[str, Any] | None = None
+        program: ScheduledProgram | None = None
         with self._lock:
             if program_id:
                 if self.schedule is None:
@@ -196,12 +240,13 @@ class AppState:
             else:
                 raise ValueError("program_id or path is required")
         assert target is not None
+        offset = self._play_offset(program, from_start=from_start, start_seconds=start_seconds)
         if payload is not None:
             try:
                 write_osd_state(self.config.osd_path, payload)
             except OSError as exc:
                 log.warning("could not write OSD state: %s", exc)
-        result = self.player.play_file(target)
+        result = self.player.play_file(target, start_seconds=offset)
         with self._lock:
             if program_id:
                 self.now_playing = self.programs_by_id.get(program_id)
@@ -209,6 +254,69 @@ class AppState:
                     self.selected_program_id = self.now_playing.id
                     self.selected_channel = self.now_playing.channel_number
         return result
+
+    def stream(
+        self,
+        program_id: str,
+        *,
+        from_start: bool = False,
+        start_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        """Return an in-page play URL (original file or MPEG-DASH) and join offset."""
+        with self._lock:
+            if self.schedule is None:
+                self.refresh()
+            program = self.programs_by_id.get(program_id)
+            if program is None:
+                raise KeyError(program_id)
+            target = program.file_path
+            payload = osd_payload_from_program(program)
+        if payload is not None:
+            try:
+                write_osd_state(self.config.osd_path, payload)
+            except OSError as exc:
+                log.warning("could not write OSD state: %s", exc)
+        offset = self._play_offset(program, from_start=from_start, start_seconds=start_seconds)
+        with self._lock:
+            self.now_playing = self.programs_by_id.get(program_id)
+            if self.now_playing is not None:
+                self.selected_program_id = self.now_playing.id
+                self.selected_channel = self.now_playing.channel_number
+        body: dict[str, Any] = {
+            "ok": True,
+            "program_id": program.id,
+            "path": str(target),
+            "title": program.title,
+            "duration_seconds": program.duration_seconds,
+            "channel": program.channel_number,
+            "channel_name": program.channel_name,
+            "player": self.config.playback.player,
+            "offset_seconds": offset,
+            "start_from": "beginning" if offset <= 0.05 else "live",
+        }
+        if can_direct_play(target, copy_ok=getattr(self.packager, "_copy_ok", None)):
+            body.update(
+                {
+                    "protocol": "file",
+                    "url": f"/media/{program.id}",
+                    "manifest": None,
+                    "packaged_from_offset": False,
+                }
+            )
+            return body
+        pack_offset = offset if offset >= 3 else 0.0
+        mpd = self.packager.ensure(program.id, target, start_seconds=pack_offset)
+        pack_id = mpd.parent.name
+        body.update(
+            {
+                "protocol": "dash",
+                "url": self.packager.manifest_url(pack_id),
+                "manifest": self.packager.manifest_url(pack_id),
+                "mpd": str(mpd),
+                "packaged_from_offset": pack_offset >= 3,
+            }
+        )
+        return body
 
     def artwork_for_program(self, program_id: str) -> Path | None:
         if self.schedule is None:
@@ -466,6 +574,8 @@ def create_app(
             {
                 "banner": bundle.config.ui.banner,
                 "theme": bundle.config.ui.theme,
+                "player": bundle.config.playback.player,
+                "start_from": bundle.config.playback.start_from,
             },
             headers={"Cache-Control": "no-store"},
         )
@@ -522,7 +632,12 @@ def create_app(
     @app.post("/api/play")
     def api_play(body: PlayRequest) -> JSONResponse:
         try:
-            result = bundle.play(program_id=body.program_id, path=body.path)
+            result = bundle.play(
+                program_id=body.program_id,
+                path=body.path,
+                from_start=body.from_start,
+                start_seconds=body.start_seconds,
+            )
         except KeyError:
             raise HTTPException(status_code=404, detail="unknown program_id") from None
         except PermissionError:
@@ -544,6 +659,64 @@ def create_app(
             log.exception("play failed")
             raise HTTPException(status_code=500, detail=str(exc)) from None
         return JSONResponse({"ok": True, **result.to_dict()})
+
+    @app.post("/api/stream")
+    def api_stream(body: PlayRequest) -> JSONResponse:
+        if not body.program_id:
+            raise HTTPException(status_code=400, detail="program_id is required")
+        try:
+            result = bundle.stream(
+                body.program_id,
+                from_start=body.from_start,
+                start_seconds=body.start_seconds,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown program_id") from None
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        except TimeoutError as exc:
+            raise HTTPException(status_code=504, detail=str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except Exception as exc:  # noqa: BLE001
+            log.exception("DASH package failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from None
+        return JSONResponse(result)
+
+    @app.get("/media/{program_id}")
+    def media_file(program_id: str) -> Response:
+        if bundle.schedule is None:
+            bundle.refresh()
+        program = bundle.programs_by_id.get(program_id)
+        if program is None:
+            raise HTTPException(status_code=404, detail="unknown program_id")
+        path = program.file_path
+        if not path.is_file() or not _is_under(path, list(bundle.config.media_roots)):
+            raise HTTPException(status_code=404, detail="media missing")
+        mime = LOGO_MIME.get(path.suffix.lower()) or {
+            ".mp4": "video/mp4",
+            ".m4v": "video/mp4",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+            ".mkv": "video/x-matroska",
+        }.get(path.suffix.lower(), "application/octet-stream")
+        return FileResponse(
+            path,
+            media_type=mime,
+            headers={"Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes"},
+        )
+
+    @app.api_route("/dash/{program_id}/{name}", methods=["GET", "HEAD"])
+    def dash_file(program_id: str, name: str) -> Response:
+        path = bundle.packager.resolve_file(program_id, name)
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="unknown dash object")
+        cache = "no-cache" if path.suffix.lower() == ".mpd" else "public, max-age=3600"
+        return FileResponse(
+            path,
+            media_type=mime_for(name),
+            headers={"Cache-Control": cache, "Accept-Ranges": "bytes"},
+        )
 
     @app.post("/api/show-guide")
     def api_show_guide() -> JSONResponse:

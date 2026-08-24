@@ -351,6 +351,8 @@ html, body {
   grid-template-columns: var(--channel-col) max-content;
   grid-template-rows: var(--timebar-h) auto;
   background: var(--grid-bg);
+  min-width: 0;
+  min-height: 0;
 }
 
 #channel-column {
@@ -495,3 +497,142 @@ html, body {
 #grid-scroll::-webkit-scrollbar { height: 10px; width: 10px; }
 #grid-scroll::-webkit-scrollbar-thumb { background: #2a6cc0; border-radius: 6px; }
 #grid-scroll::-webkit-scrollbar-track { background: #071e40; }
+
+#stage {
+  display: none;
+  background: #000;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#stage.is-on {
+  display: block;
+  pointer-events: auto;
+}
+
+#stage.is-full {
+  position: fixed !important;
+  inset: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  z-index: 80 !important;
+}
+
+#player {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+
+#hud {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #fff;
+  font-family: inherit;
+  background: linear-gradient(180deg, rgba(6, 24, 56, 0.72) 0%, rgba(6, 24, 56, 0) 28%, rgba(6, 24, 56, 0) 58%, rgba(6, 24, 56, 0.88) 100%);
+  z-index: 2;
+}
+
+#hud[hidden] { display: none; }
+
+#hud-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 0;
+}
+
+#hud-live {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: #e12626;
+  padding: 3px 8px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+#hud-copy { min-width: 0; }
+
+#hud-title {
+  font-size: 28px;
+  font-weight: 700;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#hud-channel {
+  margin-top: 4px;
+  font-size: 16px;
+  color: #d5e8ff;
+}
+
+#hud-bottom {
+  padding: 0 16px 16px;
+}
+
+#hud-seek,
+#hud-volume {
+  accent-color: var(--selected);
+  width: 100%;
+}
+
+#hud-volume { width: 110px; }
+
+#hud-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+#hud-row button {
+  appearance: none;
+  border: 0;
+  background: var(--selected);
+  color: var(--selected-text);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+#hud-row button:hover { filter: brightness(1.08); }
+
+#hud-time {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #e8f3ff;
+  min-width: 7.5em;
+}
+
+body.watching {
+  background: #000;
+}
+
+body.watching #guide-body,
+body.watching #guide-footer,
+body.watching #header-top {
+  display: none;
+}
+
+body.watching #guide-header {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body.watching #detail-panel {
+  display: none;
+}

@@ -16,6 +16,10 @@ DEFAULT_BIND_HOST = "127.0.0.1"
 DEFAULT_BIND_PORT = 8787
 DEFAULT_LOGO_FILENAME = "provider_logo.png"
 DEFAULT_BANNER = "TV Listings"
+DEFAULT_PLAYER = "browser"
+DEFAULT_START_FROM = "live"
+VALID_LIBRARY_KINDS = ("channels", "tv", "movies", "jellyfin", "auto")
+VALID_PLAYERS = ("browser", "mpv", "both")
 
 
 def banner_text(value: Any, default: str = DEFAULT_BANNER) -> str:
@@ -36,12 +40,38 @@ class ScheduleConfig:
 
 @dataclass
 class PlaybackConfig:
-    player: str = "mpv"
+    player: str = DEFAULT_PLAYER
     mpv_args: list[str] = field(default_factory=lambda: ["--fullscreen", "--hwdec=auto"])
-    start_from: str = "beginning"
+    start_from: str = DEFAULT_START_FROM
     ipc_socket: str | None = None
     filter: str = "off"
     filter_preset: str | None = None
+
+
+@dataclass
+class LibraryRoot:
+    path: Path
+    kind: str = "channels"
+
+
+@dataclass
+class LineupConfig:
+    """Rename or replace the auto genre channels."""
+
+    names: dict[str, str] = field(default_factory=dict)
+    channels: list[dict[str, Any]] = field(default_factory=list)
+    fallback: str | None = None
+    fallback_number: int | None = None
+
+
+@dataclass
+class LibraryConfig:
+    """Jellyfin-layout libraries, auto channel lineup, and optional auto-organize."""
+
+    auto_organize: bool = False
+    inbox: Path | None = None
+    fetch_metadata: bool = True
+    auto_channels: bool = True
 
 
 @dataclass
@@ -71,6 +101,9 @@ class ArtworkConfig:
 @dataclass
 class AppConfig:
     media_roots: list[Path] = field(default_factory=list)
+    libraries: list[LibraryRoot] = field(default_factory=list)
+    library: LibraryConfig = field(default_factory=LibraryConfig)
+    lineup: LineupConfig = field(default_factory=LineupConfig)
     config_dir: Path = field(default_factory=lambda: DEFAULT_CONFIG_DIR)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     playback: PlaybackConfig = field(default_factory=PlaybackConfig)
@@ -78,6 +111,11 @@ class AppConfig:
     remote: RemoteConfig = field(default_factory=RemoteConfig)
     artwork: ArtworkConfig = field(default_factory=ArtworkConfig)
     logo_filename: str = DEFAULT_LOGO_FILENAME
+
+    def library_roots(self) -> list[LibraryRoot]:
+        if self.libraries:
+            return list(self.libraries)
+        return [LibraryRoot(path=path, kind="channels") for path in self.media_roots]
 
     @property
     def logo_path(self) -> Path:
@@ -123,6 +161,107 @@ def _mode(value: Any, default: str = "sequential") -> str:
     if text in {"sequential", "random"}:
         return text
     return default
+
+
+def normalize_player(value: Any, default: str = DEFAULT_PLAYER) -> str:
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"browser", "dash", "web", "html"}:
+        return "browser"
+    if text in {"mpv"}:
+        return "mpv"
+    if text in {"both", "all"}:
+        return "both"
+    return default
+
+
+def normalize_start_from(value: Any, default: str = DEFAULT_START_FROM) -> str:
+    if value is None:
+        return default
+    text = str(value).strip().lower().replace("-", "_")
+    if text in {"live", "now", "guide", "join"}:
+        return "live"
+    if text in {"beginning", "start", "zero", "0", "from_start", "fromstart"}:
+        return "beginning"
+    return default
+
+
+def normalize_kind(value: Any, default: str = "channels") -> str:
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"channel", "channels", "legacy"}:
+        return "channels"
+    if text in {"tv", "show", "shows", "series"}:
+        return "tv"
+    if text in {"movie", "movies", "film", "films"}:
+        return "movies"
+    if text in {"jellyfin", "media"}:
+        return "jellyfin"
+    if text in {"auto", "lineup", "cable"}:
+        return "auto"
+    return default
+
+
+def _parse_libraries(value: Any) -> list[LibraryRoot]:
+    if not value:
+        return []
+    if isinstance(value, (str, Path)):
+        return [LibraryRoot(path=_as_path(value), kind="channels")]
+    roots: list[LibraryRoot] = []
+    for item in value:
+        if isinstance(item, (str, Path)):
+            roots.append(LibraryRoot(path=_as_path(item), kind="channels"))
+            continue
+        if not isinstance(item, dict):
+            continue
+        path = item.get("path") or item.get("root")
+        if not path:
+            continue
+        roots.append(LibraryRoot(path=_as_path(path), kind=normalize_kind(item.get("kind"))))
+    return roots
+
+
+def _parse_lineup(value: Any) -> LineupConfig:
+    if not value:
+        return LineupConfig()
+    if not isinstance(value, dict):
+        return LineupConfig()
+    reserved = {"names", "channels", "fallback", "fallback_number"}
+    names_raw = value.get("names")
+    extra_names = {k: v for k, v in value.items() if k not in reserved and isinstance(v, str)}
+    names: dict[str, str] = {}
+    if isinstance(names_raw, dict):
+        names.update({str(k): str(v) for k, v in names_raw.items() if v is not None})
+    names.update({str(k): str(v) for k, v in extra_names.items()})
+    channels_raw = value.get("channels") or []
+    channels: list[dict[str, Any]] = []
+    if isinstance(channels_raw, list):
+        for row in channels_raw:
+            if isinstance(row, dict) and row.get("name"):
+                channels.append(row)
+    fallback_number = value.get("fallback_number")
+    return LineupConfig(
+        names=names,
+        channels=channels,
+        fallback=str(value["fallback"]).strip() if value.get("fallback") else None,
+        fallback_number=int(fallback_number) if fallback_number is not None else None,
+    )
+
+
+def _sync_roots(media_roots: list[Path], libraries: list[LibraryRoot]) -> tuple[list[Path], list[LibraryRoot]]:
+    if libraries and not media_roots:
+        media_roots = [lib.path for lib in libraries]
+    elif media_roots and not libraries:
+        libraries = [LibraryRoot(path=path, kind="channels") for path in media_roots]
+    elif libraries and media_roots:
+        known = {str(path) for path in media_roots}
+        for lib in libraries:
+            if str(lib.path) not in known:
+                media_roots.append(lib.path)
+                known.add(str(lib.path))
+    return media_roots, libraries
 
 
 def find_settings_path(explicit: str | Path | None = None) -> Path | None:
@@ -172,12 +311,16 @@ def load_config(
     env_root = os.environ.get("LOCALCABLE_MEDIA_ROOT")
     if env_root:
         media_roots = _as_path_list(env_root)
+    libraries = _parse_libraries(raw.get("libraries"))
+    media_roots, libraries = _sync_roots(media_roots, libraries)
 
     sched_raw = raw.get("schedule") or {}
     play_raw = raw.get("playback") or {}
     ui_raw = raw.get("ui") or {}
     remote_raw = raw.get("remote") or {}
     art_raw = raw.get("artwork") or {}
+    lib_raw = raw.get("library") or {}
+    lineup_raw = raw.get("lineup") or {}
 
     schedule = ScheduleConfig(
         window_hours_before=float(sched_raw.get("window_hours_before", 6)),
@@ -189,9 +332,9 @@ def load_config(
         mpv_args = [mpv_args]
     preset = play_raw.get("filter_preset")
     playback = PlaybackConfig(
-        player=str(play_raw.get("player", "mpv")),
+        player=normalize_player(play_raw.get("player", DEFAULT_PLAYER)),
         mpv_args=list(mpv_args),
-        start_from=str(play_raw.get("start_from", "beginning")),
+        start_from=normalize_start_from(play_raw.get("start_from", DEFAULT_START_FROM)),
         ipc_socket=play_raw.get("ipc_socket"),
         filter=normalize_filter(play_raw.get("filter", "off")),
         filter_preset=str(preset) if preset else None,
@@ -209,10 +352,24 @@ def load_config(
         digit_timeout_ms=int(remote_raw.get("digit_timeout_ms", 1400)),
     )
     artwork = ArtworkConfig(fetch=bool(art_raw.get("fetch", True)))
+    inbox = lib_raw.get("inbox") or lib_raw.get("organize_from")
+    auto_channels = lib_raw.get("auto_channels")
+    if auto_channels is None:
+        auto_channels = True
+    library = LibraryConfig(
+        auto_organize=bool(lib_raw.get("auto_organize", False)),
+        inbox=_as_path(inbox) if inbox else None,
+        fetch_metadata=bool(lib_raw.get("fetch_metadata", True)),
+        auto_channels=bool(auto_channels),
+    )
+    lineup = _parse_lineup(lineup_raw)
     logo_filename = str(raw.get("logo", DEFAULT_LOGO_FILENAME))
 
     config = AppConfig(
         media_roots=media_roots,
+        libraries=libraries,
+        library=library,
+        lineup=lineup,
         config_dir=config_dir,
         schedule=schedule,
         playback=playback,
@@ -230,6 +387,21 @@ def apply_cli_overrides(config: AppConfig, args: Any | None) -> AppConfig:
     roots = getattr(args, "media_root", None)
     if roots:
         config.media_roots = [_as_path(r) for r in roots]
+        config.libraries = [LibraryRoot(path=path, kind="channels") for path in config.media_roots]
+    for kind, attr in (("tv", "tv_root"), ("movies", "movies_root")):
+        extra = getattr(args, attr, None) or []
+        for raw_path in extra:
+            path = _as_path(raw_path)
+            config.libraries.append(LibraryRoot(path=path, kind=kind))
+            if path not in config.media_roots:
+                config.media_roots.append(path)
+    if getattr(args, "organize", False):
+        config.library.auto_organize = True
+    if getattr(args, "inbox", None):
+        config.library.inbox = _as_path(args.inbox)
+        config.library.auto_organize = True
+    if getattr(args, "player", None):
+        config.playback.player = normalize_player(args.player, config.playback.player)
     if getattr(args, "bind", None):
         config.ui.bind_host = str(args.bind)
     if getattr(args, "port", None) is not None:

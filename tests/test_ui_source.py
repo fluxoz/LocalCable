@@ -26,9 +26,18 @@ def test_html_has_guide_landmarks():
         'id="now-line"',
         'id="play-button"',
         'id="header-label"',
+        'id="player"',
+        'id="hud"',
+        'id="hud-restart"',
+        'id="stage"',
         "TV Listings",
+        "/static/vendor/dash.all.min.js",
     ):
         assert needle in html, needle
+    assert "cdn.dashjs.org" not in html
+    assert "unpkg.com" not in html
+    assert "jsdelivr" not in html
+    assert "cdnjs" not in html
 
 
 def test_css_has_layout_hooks():
@@ -44,6 +53,10 @@ def test_css_has_layout_hooks():
         "#video-overlay",
         "#detail-art",
         ".with-mail",
+        "#stage",
+        "#hud",
+        "#player",
+        "body.watching",
     ):
         assert needle in css, needle
 
@@ -73,6 +86,14 @@ def test_js_is_browser_script_without_node_modules():
     assert "ChannelUp" in js
     assert "typeChannelDigit" in js
     assert "isGuideKey" in js
+    assert "scrollProgramIntoView" in js
+    assert "/api/stream" in js
+    assert "dashjs" in js
+    assert "enterWatching" in js
+    assert "handleWatchKey" in js
+    assert "restartFromBeginning" in js
+    assert "liveOffset" in js
+    assert "from_start" in js
     on_key = js.split("function onKey", 1)[1].split("function currentChannelIndex", 1)[0]
     assert "isGuideKey" in on_key
     assert "playProgram" in on_key

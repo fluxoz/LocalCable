@@ -10,7 +10,14 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from localcable.app import AppState, create_app
-from localcable.config import AppConfig, ArtworkConfig, PlaybackConfig, ScheduleConfig, UiConfig
+from localcable.config import (
+    AppConfig,
+    ArtworkConfig,
+    LibraryConfig,
+    PlaybackConfig,
+    ScheduleConfig,
+    UiConfig,
+)
 from localcable.player import MpvController
 
 
@@ -29,9 +36,10 @@ def _config(tmp_path: Path, media_root: Path, mode: str = "sequential") -> AppCo
             window_hours_after=20 / 3600,
             default_mode=mode,
         ),
-        playback=PlaybackConfig(mpv_args=[]),
+        playback=PlaybackConfig(player="mpv", start_from="beginning", mpv_args=[]),
         ui=UiConfig(auto_open_browser=False, bind_host="127.0.0.1", bind_port=8787),
         artwork=ArtworkConfig(fetch=False),
+        library=LibraryConfig(fetch_metadata=False),
         logo_filename="provider_logo.svg",
     )
 
@@ -114,9 +122,17 @@ def test_index_and_logo(tmp_path: Path, media_root: Path, frozen_now: datetime):
         assert js.status_code == 200
         assert "LocalCableGuide" in js.text
         assert "TV Listings" in html
+        assert "/static/vendor/dash.all.min.js" in html
+        assert "cdn.dashjs.org" not in html
+        assert 'id="player"' in html
+        assert 'id="hud"' in html
         ui = client.get("/api/ui")
         assert ui.status_code == 200
         assert ui.json()["banner"] == "TV Listings"
+        assert ui.json()["player"] == "mpv"
+        vendor = client.get("/static/vendor/dash.all.min.js")
+        assert vendor.status_code == 200
+        assert "dashjs" in vendor.text[:500]
 
 
 def test_custom_banner_text(tmp_path: Path, media_root: Path, frozen_now: datetime):
@@ -215,3 +231,54 @@ def test_show_guide_does_not_touch_player(
     assert focused
     assert focused[0]["title"] == "LocalCable Guide"
     assert "mpv" not in str(focused).lower()
+
+
+class _FakePackager:
+    def __init__(self, root: Path):
+        self.root = Path(root) / "dash"
+
+    def manifest_url(self, program_id: str) -> str:
+        return f"/dash/{program_id}/manifest.mpd"
+
+    def resolve_file(self, program_id: str, name: str):
+        path = self.root / program_id / name
+        return path if path.is_file() else None
+
+    def ensure(self, program_id: str, file_path, *, wait: float = 8.0, start_seconds: float = 0.0):
+        dest = self.root / program_id
+        dest.mkdir(parents=True, exist_ok=True)
+        mpd = dest / "manifest.mpd"
+        mpd.write_text('<?xml version="1.0"?><MPD profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"/>' + "x" * 40)
+        (dest / "init-0.m4s").write_bytes(b"fake-segment")
+        return mpd
+
+
+def test_stream_endpoint_serves_vendored_dash_manifest(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    config = _config(tmp_path, media_root)
+    config.playback.player = "browser"
+    player, recorded = _fake_player(tmp_path)
+    state = AppState(
+        config,
+        now_fn=lambda: frozen_now,
+        player=player,
+        packager=_FakePackager(config.cache_dir),
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        body = client.get("/api/schedule").json()
+        program = body["channels"][0]["programs"][0]
+        response = client.post("/api/stream", json={"program_id": program["id"]})
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["manifest"] == f"/dash/{program['id']}/manifest.mpd"
+        assert recorded == []
+        mpd = client.get(payload["manifest"])
+        assert mpd.status_code == 200
+        assert "dash" in mpd.headers.get("content-type", "").lower()
+        seg = client.get(f"/dash/{program['id']}/init-0.m4s")
+        assert seg.status_code == 200
+        missing = client.get(f"/dash/{program['id']}/../passwd")
+        assert missing.status_code in {404, 422}

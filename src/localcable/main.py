@@ -14,17 +14,20 @@ import uvicorn
 from localcable import __version__
 from localcable.app import AppState, create_app
 from localcable.config import DEFAULT_BIND_HOST, DEFAULT_BIND_PORT, load_config
+from localcable.util import lan_ipv4_addresses
 
 log = logging.getLogger("localcable")
 
 DESCRIPTION = """\
-LocalCable turns each subfolder of a media root into a cable channel and
-serves a living electronic program guide on localhost.
+LocalCable turns a media library into a cable-style guide. Channel folders,
+Jellyfin Shows/Movies trees, and an in-page dash.js player (plus optional mpv).
 """
 
 EPILOG = """\
 examples:
   localcable --media-root ~/Videos/LocalCableMedia
+  localcable --headless --bind 0.0.0.0 --media-root ~/Videos/LocalCableMedia
+  localcable --tv-root ~/Videos/Shows --movies-root ~/Videos/Movies
   localcable --headless --config ~/.config/localcable/settings.yaml
   python -m localcable --headed --port 8787 --media-root /media/tv
 """
@@ -43,7 +46,38 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="PATH",
-        help="Media library root (repeatable). Each immediate subfolder is a channel.",
+        help="Library root (repeatable). Channel folders, or a parent with Movies/ and Shows/.",
+    )
+    parser.add_argument(
+        "--tv-root",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Jellyfin TV/Shows library root (repeatable).",
+    )
+    parser.add_argument(
+        "--movies-root",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Jellyfin Movies library root (repeatable).",
+    )
+    parser.add_argument(
+        "--player",
+        choices=["browser", "mpv", "both"],
+        default=None,
+        help="Where Watch plays: in-page DASH, local mpv, or both (default browser).",
+    )
+    parser.add_argument(
+        "--organize",
+        action="store_true",
+        help="Auto-organize loose/inbox files into the Jellyfin folder layout.",
+    )
+    parser.add_argument(
+        "--inbox",
+        default=None,
+        metavar="PATH",
+        help="Folder of loose downloads to organize (implies --organize).",
     )
     parser.add_argument("--bind", default=None, help=f"Bind host (default {DEFAULT_BIND_HOST})")
     parser.add_argument(
@@ -84,9 +118,10 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     config = load_config(args.config, args=args)
-    if not config.media_roots:
+    if not config.media_roots and not config.libraries:
         parser.error(
-            "no media root configured. Pass --media-root PATH or set media_roots in settings.yaml"
+            "no media library configured. Pass --media-root / --tv-root / --movies-root "
+            "or set media_roots / libraries in settings.yaml"
         )
     missing = [p for p in config.media_roots if not Path(p).is_dir()]
     if missing:
@@ -97,9 +132,16 @@ def main(argv: list[str] | None = None) -> int:
     host = config.ui.bind_host
     port = int(config.ui.bind_port)
     url = public_url(host, port)
+    lan = lan_ipv4_addresses() if host in {"0.0.0.0", "::", "[::]"} else []
 
     print(f"LocalCable v{__version__}")
     print(f"Guide:  {url}")
+    if lan:
+        for ip in lan:
+            print(f"LAN:    http://{ip}:{port}/")
+    elif host in {"127.0.0.1", "localhost", "::1"}:
+        print("LAN:    (not reachable — bind 127.0.0.1). Use --bind 0.0.0.0 to share on the LAN")
+    print(f"Player: {config.playback.player}")
     print(f"Media:  {', '.join(str(p) for p in config.media_roots)}")
     print(f"Config: {config.config_dir}")
     print(f"Mode:   {config.schedule.default_mode}  ({'headed' if config.ui.auto_open_browser else 'headless'})")

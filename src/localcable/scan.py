@@ -281,3 +281,26 @@ def scan_media_root(
 
     channels.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
     return channels
+
+
+def merge_channels(*groups: list[Channel]) -> list[Channel]:
+    """Combine scans from several roots, keeping unique channel numbers."""
+    used: set[int] = set()
+    out: list[Channel] = []
+    overflow: list[Channel] = []
+    for group in groups:
+        for channel in group:
+            if channel.number in used:
+                overflow.append(channel)
+            else:
+                used.add(channel.number)
+                out.append(channel)
+    for channel in overflow:
+        number = 1
+        while number in used:
+            number += 1
+        channel.number = number
+        used.add(number)
+        out.append(channel)
+    out.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
+    return out

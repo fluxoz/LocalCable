@@ -83,11 +83,12 @@ class PlayResult:
         }
 
 
-def ipc_commands_for_play(path: str) -> list[list[Any]]:
-    """JSON IPC command list that loads *path* and seeks to the start."""
+def ipc_commands_for_play(path: str, start_seconds: float = 0.0) -> list[list[Any]]:
+    """JSON IPC command list that loads *path* and seeks to *start_seconds*."""
+    seek = max(0.0, float(start_seconds or 0.0))
     return [
         ["loadfile", path, "replace"],
-        ["seek", 0, "absolute"],
+        ["seek", seek, "absolute"],
         ["set_property", "pause", False],
     ]
 
@@ -99,11 +100,14 @@ def build_mpv_argv(
     *,
     filter_mode: str = "off",
     filter_preset: str | Path | None = None,
+    start_seconds: float = 0.0,
 ) -> list[str]:
-    """Argv that starts mpv on *file_path* from the beginning, with IPC enabled."""
+    """Argv that starts mpv on *file_path*, with IPC enabled."""
     extra = [str(a) for a in (extra_args or [])]
     mode = normalize_filter(filter_mode)
     filt = mpv_filter_args(mode, explicit_preset=filter_preset)
+    start = max(0.0, float(start_seconds or 0.0))
+    start_args = [f"--start={start:.3f}"] if start > 0.05 else []
     return [
         "mpv",
         f"--input-ipc-server={socket_path}",
@@ -111,6 +115,7 @@ def build_mpv_argv(
         *_script_args(extra),
         *extra,
         *filt,
+        *start_args,
         "--",
         str(file_path),
     ]
@@ -169,21 +174,22 @@ class MpvController:
         merged.update(self.extra_env)
         return merged
 
-    def build_argv(self, file_path: str) -> list[str]:
+    def build_argv(self, file_path: str, start_seconds: float = 0.0) -> list[str]:
         return build_mpv_argv(
             file_path,
             self.socket_path,
             self.extra_args,
             filter_mode=self.filter_mode,
             filter_preset=self.filter_preset,
+            start_seconds=start_seconds,
         )
 
-    def play_file(self, file_path: str | Path) -> PlayResult:
-        """Play *file_path* from the beginning. Prefers IPC; otherwise spawns mpv."""
+    def play_file(self, file_path: str | Path, start_seconds: float = 0.0) -> PlayResult:
+        """Play *file_path* from *start_seconds*. Prefers IPC; otherwise spawns mpv."""
         path = str(Path(file_path).expanduser().resolve())
-        argv = self.build_argv(path)
-        commands = ipc_commands_for_play(path)
-        if self._try_ipc(path):
+        argv = self.build_argv(path, start_seconds)
+        commands = ipc_commands_for_play(path, start_seconds)
+        if self._try_ipc(path, start_seconds):
             return PlayResult(path=path, argv=argv, method="ipc", ipc_commands=commands)
 
         binary = self._which("mpv")
@@ -210,14 +216,14 @@ class MpvController:
             self._close_ipc()
             return False
 
-    def _try_ipc(self, path: str) -> bool:
+    def _try_ipc(self, path: str, start_seconds: float = 0.0) -> bool:
         try:
             sock = self._connect()
         except OSError:
             self._close_ipc()
             return False
         try:
-            for command in ipc_commands_for_play(path):
+            for command in ipc_commands_for_play(path, start_seconds):
                 self._send(sock, command)
         except OSError:
             self._close_ipc()

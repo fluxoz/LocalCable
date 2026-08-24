@@ -10,6 +10,13 @@ from typing import Literal
 ScheduleMode = Literal["sequential", "random"]
 
 
+def isoformat_local(dt: datetime) -> str:
+    """RFC 3339 with offset, seconds only — JS Date() parses this reliably."""
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    return dt.isoformat(timespec="seconds")
+
+
 @dataclass
 class MediaFile:
     path: Path
@@ -54,8 +61,8 @@ class ScheduledProgram:
             "genre": self.genre,
             "duration_seconds": self.duration_seconds,
             "file_path": str(self.file_path),
-            "start_time": self.start_time.isoformat(),
-            "end_time": self.end_time.isoformat(),
+            "start_time": isoformat_local(self.start_time),
+            "end_time": isoformat_local(self.end_time),
             "channel_number": self.channel_number,
             "channel_name": self.channel_name,
             "art": f"/art/{self.id}",
@@ -89,8 +96,8 @@ class GuideSchedule:
 
     def to_dict(self) -> dict:
         return {
-            "now": self.now.isoformat(),
-            "window_start": self.window_start.isoformat(),
-            "window_end": self.window_end.isoformat(),
+            "now": isoformat_local(self.now),
+            "window_start": isoformat_local(self.window_start),
+            "window_end": isoformat_local(self.window_end),
             "channels": [ch.to_dict() for ch in self.channels],
         }
