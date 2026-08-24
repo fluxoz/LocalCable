@@ -23,6 +23,7 @@ library:
   auto_organize: false
   # inbox: ~/Downloads
   fetch_metadata: true
+  min_channels: 0               # pad the guide by repeating channels (try 24)
 
 # Optional: defaults to the directory that contains this file.
 # config_dir: ~/.config/localcable
@@ -39,6 +40,12 @@ playback:
   player: browser
   mpv_args: ["--fullscreen", "--hwdec=auto"]
   start_from: live                # live = join at the guide's "now"; beginning = always 0:00
+  # CRT / VHS look (https://ntsc.rs/). off | ntsc | vhs
+  # mpv uses the vendored ntscrs plugin. The in-page HUD CRT checkbox is CSS by
+  # default (fast over NFS). Set inpage_filter: ntscrs for authentic encode (slow).
+  inpage_filter: css            # css | ntscrs | off
+  filter: off
+  # filter_preset: ~/presets/my-tape.json
 
 # Rename (or fully replace) the auto genre channels.
 # Keys match a default name (Chuckle), a genre (comedy), or a channel number (6).
@@ -50,10 +57,6 @@ lineup:
   # fallback: WXYZ 8
   # channels:
   #   - { number: 6, name: Comedy Central, genres: [comedy, sitcom] }
-  # CRT / VHS look (https://ntsc.rs/). off | ntsc | vhs  (mpv only)
-  # Authentic path: install the ntscrs frei0r plugin; otherwise a 480p analog chain is used.
-  filter: off
-  # filter_preset: ~/presets/my-tape.json
 
 ui:
   theme: xfinity

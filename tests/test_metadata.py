@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from localcable.metadata import clean_filename_title, probe_media
+from localcable.metadata import clean_filename_title, copy_plan, mse_copy_ok, probe_media, run_ffprobe
 from tests.helpers import make_video
 
 
@@ -22,6 +22,36 @@ def test_ffprobe_duration_matches_file(tmp_path: Path):
     assert media is not None
     assert media.duration_seconds == pytest.approx(2.0, abs=0.25)
     assert media.path.resolve() == path.resolve()
+    assert media.video_codec == "mpeg4"
+    assert media.mse_copy is False
+
+
+def test_mse_copy_ok_h264_aac():
+    assert mse_copy_ok("h264", ["aac"]) is True
+    assert mse_copy_ok("h264", []) is True
+    assert mse_copy_ok("mpeg4", ["aac"]) is False
+    assert mse_copy_ok("h264", ["ac3"]) is False
+    assert copy_plan("h264", ["aac"]) == "copy"
+    assert copy_plan("h264", ["ac3"]) == "audio"
+    assert copy_plan("hevc", ["aac"]) == "xcode"
+
+
+def test_run_ffprobe_is_bounded(tmp_path: Path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"x")
+    seen: list[list[str]] = []
+
+    class Result:
+        returncode = 0
+        stdout = "{}"
+
+    def runner(argv, **_k):
+        seen.append(list(argv))
+        return Result()
+
+    run_ffprobe(path, runner=runner)
+    assert seen
+    assert "-probesize" in seen[0]
 
 
 def test_cleaned_filename_title_when_tags_absent(tmp_path: Path):

@@ -7,9 +7,10 @@ import random
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
-from localcable.app import AppState, create_app
+from localcable.app import AppState, MediaFileResponse, create_app
 from localcable.config import (
     AppConfig,
     ArtworkConfig,
@@ -19,6 +20,7 @@ from localcable.config import (
     UiConfig,
 )
 from localcable.player import MpvController
+from tests.helpers import make_video
 
 
 def _config(tmp_path: Path, media_root: Path, mode: str = "sequential") -> AppConfig:
@@ -130,6 +132,7 @@ def test_index_and_logo(tmp_path: Path, media_root: Path, frozen_now: datetime):
         assert ui.status_code == 200
         assert ui.json()["banner"] == "TV Listings"
         assert ui.json()["player"] == "mpv"
+        assert ui.json()["inpage_filter"] == "css"
         vendor = client.get("/static/vendor/dash.all.min.js")
         assert vendor.status_code == 200
         assert "dashjs" in vendor.text[:500]
@@ -244,7 +247,7 @@ class _FakePackager:
         path = self.root / program_id / name
         return path if path.is_file() else None
 
-    def ensure(self, program_id: str, file_path, *, wait: float = 8.0, start_seconds: float = 0.0):
+    def ensure(self, program_id: str, file_path, *, wait: float = 8.0, start_seconds: float = 0.0, **_kwargs):
         dest = self.root / program_id
         dest.mkdir(parents=True, exist_ok=True)
         mpd = dest / "manifest.mpd"
@@ -282,3 +285,73 @@ def test_stream_endpoint_serves_vendored_dash_manifest(
         assert seg.status_code == 200
         missing = client.get(f"/dash/{program['id']}/../passwd")
         assert missing.status_code in {404, 422}
+
+
+def test_preview_does_not_package_dash(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    config = _config(tmp_path, media_root)
+    config.playback.player = "browser"
+    player, recorded = _fake_player(tmp_path)
+    packager = _FakePackager(config.cache_dir)
+    state = AppState(
+        config,
+        now_fn=lambda: frozen_now,
+        player=player,
+        packager=packager,
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        body = client.get("/api/schedule").json()
+        program = body["channels"][0]["programs"][0]
+        response = client.get(f"/api/preview/{program['id']}")
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["protocol"] in {"file", "art"}
+        assert payload["art"].startswith("/art/")
+        assert recorded == []
+        assert not (config.cache_dir / "dash").exists() or not any(
+            (config.cache_dir / "dash").glob("*/manifest.mpd")
+        )
+
+
+def test_stream_h264_mp4_uses_http_range(
+    tmp_path: Path, frozen_now: datetime
+):
+    media_root = tmp_path / "media"
+    dest = media_root / "101_HBO" / "film.mp4"
+    try:
+        make_video(dest, 2.0, codec="libx264")
+    except RuntimeError as exc:
+        pytest.skip(f"libx264 not available: {exc}")
+    config = _config(tmp_path, media_root)
+    config.playback.player = "browser"
+    player, recorded = _fake_player(tmp_path)
+    packager = _FakePackager(config.cache_dir)
+    state = AppState(
+        config,
+        now_fn=lambda: frozen_now,
+        player=player,
+        packager=packager,
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        body = client.get("/api/schedule").json()
+        program = body["channels"][0]["programs"][0]
+        preview = client.get(f"/api/preview/{program['id']}").json()
+        assert preview["protocol"] == "file"
+        response = client.post("/api/stream", json={"program_id": program["id"]})
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["protocol"] == "file"
+        assert payload["url"].startswith("/media/")
+        assert recorded == []
+        assert not any((config.cache_dir / "dash").glob("*/manifest.mpd"))
+        ranged = client.get(payload["url"], headers={"Range": "bytes=0-15"})
+        assert ranged.status_code in {200, 206}
+        assert len(ranged.content) > 0
+
+
+def test_media_response_uses_large_chunks():
+    assert MediaFileResponse.chunk_size >= 1024 * 1024

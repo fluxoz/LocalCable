@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from localcable.config import load_config
-from localcable.crt import lavfi_graph, mpv_filter_args, normalize_filter, preset_path
+from localcable.crt import (
+    VENDOR_FREI0R,
+    find_frei0r_ntscrs,
+    lavfi_graph,
+    mpv_filter_args,
+    normalize_filter,
+    preset_path,
+)
 from localcable.player import build_mpv_argv
 
 
@@ -33,6 +40,18 @@ def test_lavfi_fallback_without_frei0r(tmp_path: Path, monkeypatch):
     assert "scale=-2:480" in ntsc
     assert "noise=" in vhs
     assert "drawgrid=" in vhs
+
+
+def test_vendored_ntscrs_plugin_is_shipped():
+    linux = VENDOR_FREI0R / "linux-x86_64" / "ntscrs.so"
+    macos = VENDOR_FREI0R / "macos-arm64" / "ntscrs.dylib"
+    windows = VENDOR_FREI0R / "windows-x86_64" / "ntscrs.dll"
+    assert linux.is_file() and linux.stat().st_size > 1000
+    assert macos.is_file() and macos.stat().st_size > 1000
+    assert windows.is_file() and windows.stat().st_size > 1000
+    found = find_frei0r_ntscrs(environ={}, include_system=False, include_vendor=True)
+    assert found is not None
+    assert found.name.startswith("ntscrs")
 
 
 def test_lavfi_uses_ntscrs_when_plugin_exists(tmp_path: Path):

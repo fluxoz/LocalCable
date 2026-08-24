@@ -19,10 +19,12 @@ from pydantic import BaseModel, Field
 
 from localcable import __version__
 from localcable.artwork import resolve_artwork
-from localcable.config import DEFAULT_BANNER, AppConfig, normalize_start_from
-from localcable.dash import DashPackager, can_direct_play, mime_for
+from localcable.config import DEFAULT_BANNER, AppConfig, normalize_inpage_filter, normalize_start_from
+from localcable.crt import normalize_filter
+from localcable.dash import DashPackager, can_direct_play, codecs_allow_copy, mime_for
 from localcable.guide_focus import GUIDE_WINDOW_TITLE, focus_guide_window
 from localcable.jellyfin import scan_libraries
+from localcable.scan import pad_channels
 from localcable.models import GuideSchedule, ScheduledProgram
 from localcable.organize import organize_library
 from localcable.osd import osd_payload_from_path, osd_payload_from_program, write_osd_state
@@ -54,11 +56,18 @@ LOGO_MIME = {
 }
 
 
+class MediaFileResponse(FileResponse):
+    """Larger chunks than Starlette's 64 KiB default — fewer RPCs on NFS."""
+
+    chunk_size = 1024 * 1024
+
+
 class PlayRequest(BaseModel):
     program_id: str | None = None
     path: str | None = Field(default=None, description="Absolute media path under a media root")
     start_seconds: float | None = None
     from_start: bool = False
+    filter: str | None = None
 
 
 class RemoteRequest(BaseModel):
@@ -124,7 +133,17 @@ class AppState:
         self._focus_guide = focus_guide or focus_guide_window
         self._artwork_opener = artwork_opener
         self._organize_opener = organize_opener
-        self.packager = packager or DashPackager(config.cache_dir)
+        self._mse_by_path: dict[str, bool] = {}
+        self._plan_by_path: dict[str, str] = {}
+        self.packager = packager or DashPackager(
+            config.cache_dir,
+            copy_ok=self._path_copy_ok,
+            copy_plan_fn=self._path_copy_plan,
+            runner=self.probe_runner,
+        )
+        if hasattr(self.packager, "filter_mode"):
+            self.packager.filter_mode = config.playback.filter
+            self.packager.filter_preset = config.playback.filter_preset
         self.channels = []
         self.schedule: GuideSchedule | None = None
         self.programs_by_id: dict[str, ScheduledProgram] = {}
@@ -135,6 +154,44 @@ class AppState:
         self._digit_timer: threading.Timer | None = None
         self._remote_stop: threading.Event | None = None
         self._lock = threading.RLock()
+
+    def _path_key(self, path: Path | str) -> str:
+        src = Path(path)
+        try:
+            return str(src.resolve())
+        except OSError:
+            return str(src)
+
+    def _path_copy_ok(self, path: Path | str) -> bool:
+        known = self._mse_by_path.get(self._path_key(path))
+        if known is not None:
+            return known
+        return codecs_allow_copy(path, runner=self.probe_runner)
+
+    def _path_copy_plan(self, path: Path | str) -> str | None:
+        return self._plan_by_path.get(self._path_key(path))
+
+    def _remember_codecs(self, channels: list[Any]) -> None:
+        mse: dict[str, bool] = {}
+        plans: dict[str, str] = {}
+        for channel in channels:
+            for item in getattr(channel, "media", []) or []:
+                key = self._path_key(item.path)
+                video = str(getattr(item, "video_codec", None) or "").lower()
+                flag = getattr(item, "mse_copy", None)
+                if flag:
+                    plans[key] = "copy"
+                    mse[key] = True
+                elif video in {"h264", "avc1"}:
+                    plans[key] = "audio"
+                    mse[key] = False
+                elif getattr(item, "video_codec", None):
+                    plans[key] = "xcode"
+                    mse[key] = False
+                elif flag is False:
+                    mse[key] = False
+        self._mse_by_path = mse
+        self._plan_by_path = plans
 
     def ensure_writable_config_dir(self) -> None:
         try:
@@ -167,7 +224,9 @@ class AppState:
                 auto_channels=self.config.library.auto_channels,
                 lineup_config=self.config.lineup,
             )
+            channels = pad_channels(channels, self.config.library.min_channels)
             self.channels = channels
+            self._remember_codecs(channels)
             self.schedule = generate_schedule(
                 channels,
                 now=now,
@@ -261,6 +320,7 @@ class AppState:
         *,
         from_start: bool = False,
         start_seconds: float | None = None,
+        filter: str | None = None,
     ) -> dict[str, Any]:
         """Return an in-page play URL (original file or MPEG-DASH) and join offset."""
         with self._lock:
@@ -294,7 +354,15 @@ class AppState:
             "offset_seconds": offset,
             "start_from": "beginning" if offset <= 0.05 else "live",
         }
-        if can_direct_play(target, copy_ok=getattr(self.packager, "_copy_ok", None)):
+        mode = normalize_filter(
+            filter if filter is not None else self.config.playback.filter
+        )
+        body["filter"] = mode
+        if mode == "off" and can_direct_play(
+            target,
+            mse_copy=getattr(program, "mse_copy", None),
+            copy_ok=getattr(self.packager, "_copy_ok", None),
+        ):
             body.update(
                 {
                     "protocol": "file",
@@ -305,7 +373,14 @@ class AppState:
             )
             return body
         pack_offset = offset if offset >= 3 else 0.0
-        mpd = self.packager.ensure(program.id, target, start_seconds=pack_offset)
+        mpd = self.packager.ensure(
+            program.id,
+            target,
+            wait=20.0,
+            start_seconds=pack_offset,
+            filter_mode=mode,
+            filter_preset=self.config.playback.filter_preset,
+        )
         pack_id = mpd.parent.name
         body.update(
             {
@@ -317,6 +392,47 @@ class AppState:
             }
         )
         return body
+
+    def preview(self, program_id: str) -> dict[str, Any]:
+        """Cheap highlight preview: original file if the browser can play it, else artwork.
+
+        Never starts ffmpeg. NFS Range reads on H.264 MP4 are enough.
+        """
+        with self._lock:
+            if self.schedule is None:
+                self.refresh()
+            program = self.programs_by_id.get(program_id)
+            if program is None:
+                raise KeyError(program_id)
+            target = program.file_path
+        art = f"/art/{program.id}"
+        if can_direct_play(
+            target,
+            mse_copy=getattr(program, "mse_copy", None),
+            copy_ok=getattr(self.packager, "_copy_ok", None),
+        ):
+            return {
+                "ok": True,
+                "protocol": "file",
+                "url": f"/media/{program.id}",
+                "art": art,
+                "program_id": program.id,
+                "title": program.title,
+                "duration_seconds": program.duration_seconds,
+                "offset_seconds": 0.0,
+                "filter": "off",
+            }
+        return {
+            "ok": True,
+            "protocol": "art",
+            "url": art,
+            "art": art,
+            "program_id": program.id,
+            "title": program.title,
+            "duration_seconds": program.duration_seconds,
+            "offset_seconds": 0.0,
+            "filter": "off",
+        }
 
     def artwork_for_program(self, program_id: str) -> Path | None:
         if self.schedule is None:
@@ -576,6 +692,8 @@ def create_app(
                 "theme": bundle.config.ui.theme,
                 "player": bundle.config.playback.player,
                 "start_from": bundle.config.playback.start_from,
+                "filter": bundle.config.playback.filter,
+                "inpage_filter": bundle.config.playback.inpage_filter,
             },
             headers={"Cache-Control": "no-store"},
         )
@@ -669,6 +787,7 @@ def create_app(
                 body.program_id,
                 from_start=body.from_start,
                 start_seconds=body.start_seconds,
+                filter=body.filter,
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="unknown program_id") from None
@@ -682,6 +801,14 @@ def create_app(
             log.exception("DASH package failed")
             raise HTTPException(status_code=500, detail=str(exc)) from None
         return JSONResponse(result)
+
+    @app.get("/api/preview/{program_id}")
+    def api_preview(program_id: str) -> JSONResponse:
+        try:
+            result = bundle.preview(program_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown program_id") from None
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     @app.get("/media/{program_id}")
     def media_file(program_id: str) -> Response:
@@ -700,7 +827,7 @@ def create_app(
             ".webm": "video/webm",
             ".mkv": "video/x-matroska",
         }.get(path.suffix.lower(), "application/octet-stream")
-        return FileResponse(
+        return MediaFileResponse(
             path,
             media_type=mime,
             headers={"Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes"},
@@ -712,7 +839,7 @@ def create_app(
         if path is None or not path.is_file():
             raise HTTPException(status_code=404, detail="unknown dash object")
         cache = "no-cache" if path.suffix.lower() == ".mpd" else "public, max-age=3600"
-        return FileResponse(
+        return MediaFileResponse(
             path,
             media_type=mime_for(name),
             headers={"Cache-Control": cache, "Accept-Ranges": "bytes"},

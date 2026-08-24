@@ -610,6 +610,76 @@ html, body {
 
 #hud-row button:hover { filter: brightness(1.08); }
 
+#hud-crt-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--selected-text);
+  background: var(--selected);
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+}
+
+#hud-crt-label input {
+  margin: 0;
+  accent-color: #123a78;
+}
+
+#stage.crt-ntsc #player,
+#stage.crt-vhs #player {
+  transform: scale(1.015);
+}
+
+#stage.crt-ntsc #player {
+  filter: contrast(1.14) saturate(0.8) hue-rotate(6deg) brightness(1.03);
+}
+
+#stage.crt-vhs #player {
+  filter: contrast(1.2) saturate(0.65) brightness(1.05) sepia(0.14);
+}
+
+#stage.crt-ntsc::after,
+#stage.crt-vhs::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.28) 0 1px,
+      transparent 1px 3px
+    ),
+    radial-gradient(ellipse at center, transparent 42%, rgba(0, 0, 0, 0.45) 100%);
+  mix-blend-mode: multiply;
+  opacity: 0.9;
+}
+
+#stage.crt-vhs::before {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  z-index: 1;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    180deg,
+    transparent 0 7px,
+    rgba(255, 255, 255, 0.03) 7px 8px
+  );
+  animation: crt-roll 9s linear infinite;
+  opacity: 0.55;
+}
+
+@keyframes crt-roll {
+  from { transform: translateY(0); }
+  to { transform: translateY(18px); }
+}
+
 #hud-time {
   font-size: 13px;
   font-variant-numeric: tabular-nums;

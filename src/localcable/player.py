@@ -161,12 +161,16 @@ class MpvController:
         env = default_guide_env(guide_url, osd_path)
         if extra_env:
             env.update(extra_env)
-        plugin = find_frei0r_ntscrs(env)
+        lookup = os.environ.copy()
+        lookup.update(env)
+        plugin = find_frei0r_ntscrs(lookup)
         if plugin is not None:
             folder = str(plugin.parent)
-            existing = env.get("FREI0R_PATH", "")
+            existing = lookup.get("FREI0R_PATH", "")
             if folder not in existing.split(":"):
                 env["FREI0R_PATH"] = f"{folder}:{existing}" if existing else folder
+            elif "FREI0R_PATH" not in env:
+                env["FREI0R_PATH"] = existing
         self.extra_env = env
 
     def _child_env(self) -> dict[str, str]:

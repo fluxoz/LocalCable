@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -167,6 +168,9 @@ def _media_from_cache(path: Path, record: dict[str, Any]) -> MediaFile | None:
     if duration_f <= 0:
         return None
     title = record.get("title") or path.stem
+    mse_copy = record.get("mse_copy")
+    if mse_copy is not None:
+        mse_copy = bool(mse_copy)
     return MediaFile(
         path=path.resolve(),
         title=str(title),
@@ -175,6 +179,9 @@ def _media_from_cache(path: Path, record: dict[str, Any]) -> MediaFile | None:
         rating=record.get("rating"),
         genre=record.get("genre"),
         year=record.get("year"),
+        video_codec=record.get("video_codec"),
+        audio_codec=record.get("audio_codec"),
+        mse_copy=mse_copy,
     )
 
 
@@ -193,6 +200,9 @@ def _cache_record(path: Path, media: MediaFile) -> dict[str, Any]:
         "rating": media.rating,
         "genre": media.genre,
         "year": media.year,
+        "video_codec": media.video_codec,
+        "audio_codec": media.audio_codec,
+        "mse_copy": media.mse_copy,
     }
 
 
@@ -302,5 +312,36 @@ def merge_channels(*groups: list[Channel]) -> list[Channel]:
         channel.number = number
         used.add(number)
         out.append(channel)
+    out.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
+    return out
+
+
+def pad_channels(channels: list[Channel], minimum: int) -> list[Channel]:
+    """Repeat existing channels until *minimum* rows fill the guide."""
+    if minimum <= 0 or not channels or len(channels) >= minimum:
+        return channels
+    used = {ch.number for ch in channels}
+    copies = {ch.number: 1 for ch in channels}
+    out = list(channels)
+    index = 0
+    while len(out) < int(minimum):
+        src = channels[index % len(channels)]
+        copies[src.number] = copies.get(src.number, 1) + 1
+        number = 1
+        while number in used:
+            number += 1
+        used.add(number)
+        suffix = copies[src.number]
+        name = src.name if suffix <= 1 else f"{src.name} {suffix}"
+        out.append(
+            replace(
+                src,
+                number=number,
+                name=name,
+                media=list(src.media),
+                playlist=list(src.playlist) if src.playlist else None,
+            )
+        )
+        index += 1
     out.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
     return out

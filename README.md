@@ -11,7 +11,7 @@ Everything runs **offline** on Linux except optional keyless artwork/metadata lo
 - Python 3.11+ (3.14 is fine) and [uv](https://docs.astral.sh/uv/) (or pip)
 - `ffmpeg` / `ffprobe` (durations, tags, and MPEG-DASH packaging for the in-page player)
 - `mpv` (optional local playback via IPC; the in-page player does not need it)
-- Optional: [ntsc-rs](https://ntsc.rs/) **frei0r** plugin (`ntscrs`) for a true analog NTSC/VHS pass on mpv (otherwise LocalCable uses a 480p scanline/noise stand-in)
+- Optional: [ntsc-rs](https://ntsc.rs/) CRT/VHS look on mpv. The **ntscrs frei0r plugin is vendored** (Linux x86_64, macOS arm64, Windows x86_64). Other platforms fall back to a 480p scanline/noise stand-in.
 
 ## Install
 
@@ -131,6 +131,7 @@ Opt-in. Parses loose filenames (`Show.Name.S01E02.720p.mkv`, `Movie.Name.1999.Bl
 ```yaml
 library:
   auto_channels: true        # genre mix + invented names (default)
+  min_channels: 24           # repeat channels so a small library still fills the grid
   auto_organize: true
   inbox: ~/Downloads
   fetch_metadata: true       # TVMaze / iTunes genres when tags/NFO are missing
@@ -261,12 +262,12 @@ ip -4 addr show
 ## Using the guide
 
 - Horizontal/vertical scroll (mouse or trackpad) moves the timeline; the channel column stays put. **Arrow keys follow the highlight** — the grid scrolls left/right (and the channel row up/down) so the selected program stays on screen.
-- **Click** a program block to select it (detail panel: full title, time range, rating, description; the right-hand video inset shows **On now** while something is playing).
+- **Click** a program block to select it (detail panel: full title, time range, rating, description). The top-right inset loads a **muted video preview** of the highlighted program.
 - The header clock and the red **now** line use **this machine’s local time**.
 - **Watch** or **double-click** joins the airing **where the timeline says you are** (`playback.start_from: live`, the default). A 4:00 show watched at 4:20 starts 20 minutes in. **Start over** on the HUD (or `start_from: beginning`) plays from 0:00.
-- Playback is in-page: browser-friendly H.264 MP4 is streamed directly (HTTP Range). Other files are packaged as MPEG-DASH (vendored dash.js, no CDN). Repeat airings reuse the cache. Transcodes start at the join-in point (capped at 720p) so you are not waiting on the first 20 minutes of a movie.
+- Playback is in-page: browser-friendly **H.264 MP4** is streamed directly (HTTP Range from the original file — this is the fast NFS path). H.264+AAC in other containers (typical Jellyfin `.mkv`) is **stream-copied** into MPEG-DASH without a CPU transcode, including live join-in-progress. HEVC, MPEG-4, AC-3, etc. still transcode (capped at 720p, starting at the join-in point). Repeat airings reuse the cache.
 - A cable-style **HUD** (channel, title, seek, volume, CH+/−, Start over, Guide) sits on the video; it auto-hides and is meant to be driven by a remote. Press **i** to pin/unpin it. Set `playback.player: mpv` to use a local mpv window instead.
-- **Esc** returns to the guide. Video keeps playing in the inset (and mpv, if you started it). It does **not** quit, un-fullscreen, or resize an mpv window.
+- **Esc** / **Guide** stay in this tab: they leave fullscreen video and show the grid. The clip keeps playing muted in the inset. They do not open a new tab, quit mpv, or resize the player window.
 
 ### CRT / VHS (ntsc-rs)
 
@@ -281,7 +282,23 @@ playback:
 - **ntsc** — composite broadcast (dot crawl, chroma smear, light snow)
 - **vhs** — tape (more noise, scanlines, tracking, chroma loss)
 
-If the **ntscrs** frei0r plugin is installed (`FREI0R_PATH` or the usual `frei0r-1` lib dirs), mpv uses that engine at 480p with a shipped preset. Otherwise LocalCable applies a built-in 480p scanline/noise chain so the option still does something. Hardware decode is turned off while the filter is on (the effect needs CPU frames). Quit any existing mpv window after changing this so it respawns with the new filter.
+LocalCable ships the [ntscrs frei0r plugin](https://github.com/rectalogic/ntsc) (the [ntsc-rs](https://ntsc.rs/) engine) under `src/localcable/vendor/ntscrs/`. **mpv** and the **in-page player** both use it at 480p with a shipped preset — no extra install on Linux x86_64, macOS Apple Silicon, or Windows x86_64.
+
+- Config: `playback.filter: off | ntsc | vhs` is the default look. HUD **CRT** checkbox toggles it.
+- **In-page CRT is CSS by default** (`playback.inpage_filter: css`) so Watch can keep HTTP Range reads from NFS/disk. Authentic ntsc-rs through ffmpeg (`inpage_filter: ntscrs`) is optional and **CPU-heavy** — it is not limited by NFS speed.
+- Highlight preview never starts ffmpeg: H.264 MP4 plays in the inset; other files show cover art.
+
+### Slow playback / NFS
+
+If the library lives on NFS, the disk is almost never the bottleneck. Sequential Range reads of an H.264 MP4 are cheap; **CPU transcode** (and a too-short wait that used to fall back from stream-copy to libx264) is what feels like “NFS is slow.”
+
+- Keep files as **H.264 + AAC in `.mp4` / `.m4v`** when you can — the browser reads them with HTTP Range and never waits on ffmpeg.
+- MKV is fine when the **video** is H.264: LocalCable remuxes the video into DASH (copy). AAC audio is copied too; AC-3/DTS is re-encoded to AAC (cheap compared with a video transcode). It no longer re-encodes video just because you joined 20 minutes in.
+- Leave `playback.inpage_filter: css` (the default). `ntscrs` encodes every frame through frei0r and will crawl on any storage.
+- Codec info is stored from the library scan so the guide does not ffprobe the NFS file on every highlight.
+- A first start after this update may re-read headers for files whose probe cache has no codec fields; after that, `~/.config/localcable/cache/probe.json` keeps them.
+- mpv still uses the vendored ntscrs plugin when `filter` is ntsc/vhs.
+- Set `FREI0R_PATH` if you want a different plugin build. Hardware decode is turned off for mpv while the filter is on. Quit any leftover mpv window after changing the YAML default.
 
 ## Remote control
 

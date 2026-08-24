@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from localcable.scan import parse_channel_folder_name, scan_media_root
+from localcable.models import Channel
+from localcable.scan import pad_channels, parse_channel_folder_name, scan_media_root
 
 
 def test_parse_numbered_prefix():
@@ -72,3 +73,19 @@ def test_empty_folder_is_still_a_channel(tmp_path: Path):
     assert by_name["Weather"].number == 1
     assert by_name["Weather"].media == []
     assert [ch.number for ch in channels] == [1, 101, 205]
+
+
+def test_pad_channels_repeats_until_minimum():
+    src = [
+        Channel(number=13, name="Thunderbolt", folder_path=Path("/a")),
+        Channel(number=6, name="Chuckle", folder_path=Path("/b")),
+    ]
+    padded = pad_channels(src, 5)
+    assert len(padded) == 5
+    names = [ch.name for ch in padded]
+    assert "Thunderbolt" in names
+    assert "Chuckle" in names
+    assert any(n.startswith("Thunderbolt") and n != "Thunderbolt" for n in names)
+    assert len({ch.number for ch in padded}) == 5
+    assert pad_channels(src, 0) == src
+    assert pad_channels([], 24) == []

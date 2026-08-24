@@ -63,6 +63,7 @@ def _airing(media: MediaFile, channel: Channel, start: datetime) -> ScheduledPro
         end_time=end,
         channel_number=channel.number,
         channel_name=channel.name,
+        mse_copy=media.mse_copy,
     )
 
 

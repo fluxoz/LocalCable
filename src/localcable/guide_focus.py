@@ -26,8 +26,13 @@ def focus_guide_window(
     which: Callable[[str], str | None] | None = None,
     open_url: Callable[[str], Any] | None = None,
     environ: dict[str, str] | None = None,
+    open_if_missing: bool = False,
 ) -> dict[str, Any]:
-    """Focus the existing guide window. Never sends commands to mpv."""
+    """Focus the existing guide window. Never sends commands to mpv.
+
+    Does not open a new browser tab unless *open_if_missing* is true — the
+    in-page guide is an SPA and must not spawn extra tabs on Esc/Guide.
+    """
     run_fn = run or subprocess.run
     which_fn = which or shutil.which
     env = environ if environ is not None else os.environ
@@ -45,7 +50,7 @@ def focus_guide_window(
     if xdo:
         return xdo
 
-    if url:
+    if url and open_if_missing:
         opener = open_url or webbrowser.open
         opener(url)
         return {"ok": True, "method": "open_url"}

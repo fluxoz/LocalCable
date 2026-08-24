@@ -15,6 +15,12 @@ log = logging.getLogger(__name__)
 
 RunFn = Callable[..., Any]
 
+# Bound header reads so a 20 GB NFS file is not scanned end-to-end.
+FFPROBE_PROBESIZE = "8000000"
+FFPROBE_ANALYZEDURATION = "2000000"
+COPY_VIDEO = {"h264", "avc1"}
+COPY_AUDIO = {"aac", "mp4a"}
+
 _JUNK_TAGS = {
     "1080p",
     "720p",
@@ -73,25 +79,34 @@ def clean_filename_title(filename: str) -> str:
     return title
 
 
-def run_ffprobe(path: Path, runner: RunFn | None = None) -> dict[str, Any]:
+def run_ffprobe(
+    path: Path,
+    runner: RunFn | None = None,
+    *,
+    streams_only: bool = False,
+    bounded: bool = True,
+) -> dict[str, Any]:
     """Return parsed ffprobe JSON, or {} on any failure (never raises)."""
     run = runner or subprocess.run
+    argv = ["ffprobe", "-v", "error"]
+    if bounded:
+        argv += [
+            "-probesize",
+            FFPROBE_PROBESIZE,
+            "-analyzeduration",
+            FFPROBE_ANALYZEDURATION,
+        ]
+    argv += ["-print_format", "json"]
+    if streams_only:
+        argv += ["-show_entries", "stream=codec_type,codec_name", "-show_streams"]
+    else:
+        argv += ["-show_format", "-show_streams"]
+    argv.append(str(path))
     try:
-        proc = run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            proc = run(argv, capture_output=True, text=True, check=False, timeout=12)
+        except TypeError:
+            proc = run(argv, capture_output=True, text=True, check=False)
     except FileNotFoundError:
         log.warning("ffprobe is not installed; cannot read duration for %s", path)
         return {}
@@ -121,6 +136,41 @@ def _float_or_none(value: Any) -> float | None:
     if number <= 0 or number != number:  # NaN
         return None
     return number
+
+
+def codecs_from_probe(data: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """Return (video codec, audio codecs) from ffprobe JSON."""
+    video: str | None = None
+    audio: list[str] = []
+    for stream in data.get("streams") or []:
+        if not isinstance(stream, dict):
+            continue
+        kind = stream.get("codec_type")
+        name = str(stream.get("codec_name") or "").strip().lower()
+        if kind == "video" and video is None:
+            video = name or None
+        elif kind == "audio" and name:
+            audio.append(name)
+    return video, audio
+
+
+def mse_copy_ok(video: str | None, audio: list[str] | None = None) -> bool:
+    """True when MSE can play a stream copy (H.264 + AAC, or H.264 silent)."""
+    if (video or "") not in COPY_VIDEO:
+        return False
+    for name in audio or []:
+        if name not in COPY_AUDIO:
+            return False
+    return True
+
+
+def copy_plan(video: str | None, audio: list[str] | None = None) -> str:
+    """``copy`` (remux), ``audio`` (H.264 copy + AAC encode), or ``xcode``."""
+    if mse_copy_ok(video, audio):
+        return "copy"
+    if (video or "") in COPY_VIDEO:
+        return "audio"
+    return "xcode"
 
 
 def duration_from_probe(data: dict[str, Any]) -> float | None:
@@ -177,8 +227,16 @@ def probe_media(path: Path | str, *, runner: RunFn | None = None) -> MediaFile |
         return None
     duration = duration_from_probe(data)
     if duration is None:
+        try:
+            data = run_ffprobe(path, runner=runner, bounded=False)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("skipping %s: %s", path, exc)
+            return None
+        duration = duration_from_probe(data)
+    if duration is None:
         log.warning("no duration for %s; skipping", path)
         return None
+    video_codec, audio_codecs = codecs_from_probe(data)
     tags = tags_from_probe(data)
     embedded_title = _first_tag(tags, "title")
     try:
@@ -202,4 +260,7 @@ def probe_media(path: Path | str, *, runner: RunFn | None = None) -> MediaFile |
         rating=rating,
         genre=genre,
         year=year,
+        video_codec=video_codec,
+        audio_codec=audio_codecs[0] if audio_codecs else None,
+        mse_copy=mse_copy_ok(video_codec, audio_codecs),
     )

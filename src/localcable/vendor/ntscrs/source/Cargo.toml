@@ -1,0 +1,28 @@
+[workspace]
+members = ["xtask"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[package]
+name = "ntscrs"
+version = "0.3.0"
+edition.workspace = true
+license.workspace = true
+repository = "https://github.com/rectalogic/ntsc"
+description = "frei0r filter plugin that implement a VHS/NTSC effect using ntsc-rs"
+readme = "README.md"
+keywords = ["frei0r", "video", "ntsc", "vhs"]
+categories = ["multimedia", "multimedia::video"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace.dependencies]
+anyhow = "1.0.101"
+
+[dependencies]
+anyhow = { workspace = true }
+frei0r-rs2 = { git = "https://github.com/rectalogic/frei0r-rs.git", tag = "2.4.0" }
+ntsc-rs = { git = "https://github.com/ntsc-rs/ntsc-rs.git", rev = "bddab2d"}

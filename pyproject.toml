@@ -39,6 +39,7 @@ packages = ["src/localcable"]
 "src/localcable/static" = "localcable/static"
 "src/localcable/mpv" = "localcable/mpv"
 "src/localcable/presets" = "localcable/presets"
+"src/localcable/vendor" = "localcable/vendor"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -66,7 +66,7 @@ def test_niri_focuses_matching_title(monkeypatch):
     assert ["niri", "msg", "action", "focus-window", "--id", "9"] in calls
 
 
-def test_falls_back_to_opening_guide_url():
+def test_does_not_open_a_new_tab_when_focus_fails():
     opened: list[str] = []
     result = focus_guide_window(
         url="http://127.0.0.1:8787/",
@@ -74,6 +74,20 @@ def test_falls_back_to_opening_guide_url():
         which=lambda _n: None,
         open_url=opened.append,
         environ={},
+    )
+    assert result["ok"] is False
+    assert opened == []
+
+
+def test_open_if_missing_can_still_open_url():
+    opened: list[str] = []
+    result = focus_guide_window(
+        url="http://127.0.0.1:8787/",
+        run=lambda *_a, **_k: SimpleNamespace(returncode=1, stdout=""),
+        which=lambda _n: None,
+        open_url=opened.append,
+        environ={},
+        open_if_missing=True,
     )
     assert result == {"ok": True, "method": "open_url"}
     assert opened == ["http://127.0.0.1:8787/"]
