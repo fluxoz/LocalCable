@@ -15,7 +15,7 @@ STATIC = Path(__file__).resolve().parents[1] / "src" / "localcable" / "static"
 SCHEDULE = {
     "now": "2026-08-23T15:00:00+00:00",
     "window_start": "2026-08-23T14:50:00+00:00",
-    "window_end": "2026-08-23T15:20:00+00:00",
+    "window_end": "2026-08-23T18:00:00+00:00",
     "channels": [
         {
             "number": 101,
@@ -46,6 +46,19 @@ SCHEDULE = {
                     "file_path": "/media/101_CNN/late_edition.mp4",
                     "start_time": "2026-08-23T15:00:00+00:00",
                     "end_time": "2026-08-23T15:20:00+00:00",
+                    "channel_number": 101,
+                    "channel_name": "CNN",
+                },
+                {
+                    "id": "p-night",
+                    "title": "Night Desk",
+                    "description": "Hours later on the timeline.",
+                    "rating": None,
+                    "genre": None,
+                    "duration_seconds": 3600,
+                    "file_path": "/media/101_CNN/night_desk.mp4",
+                    "start_time": "2026-08-23T17:00:00+00:00",
+                    "end_time": "2026-08-23T18:00:00+00:00",
                     "channel_number": 101,
                     "channel_name": "CNN",
                 },
@@ -83,24 +96,36 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
 (function () {{
   var errors = window.__pageErrors.slice();
   try {{
+    var scroller0 = document.getElementById("grid-scroll");
+    if (scroller0) {{
+      scroller0.style.cssText = "position:relative;width:640px;max-width:640px;min-width:0;height:240px;overflow:scroll;";
+    }}
     window.LocalCableGuide.render({payload});
     var late = document.querySelector('[data-program-id="p-late"]');
     if (!late) throw new Error("late program block missing");
     late.dispatchEvent(new MouseEvent("click", {{ bubbles: true }}));
+    var night = document.querySelector('[data-program-id="p-night"]');
+    if (!night) throw new Error("night program block missing");
+    night.dispatchEvent(new MouseEvent("click", {{ bubbles: true }}));
+    if (window.LocalCableGuide.scrollProgramIntoView) window.LocalCableGuide.scrollProgramIntoView("p-night");
   }} catch (err) {{
     errors.push(String(err));
   }}
   var title = document.getElementById("detail-title");
   var time = document.getElementById("detail-time");
+  var scroller = document.getElementById("grid-scroll");
   var report = {{
-    installed: !!(window.LocalCableGuide && window.LocalCableGuide.selectProgram),
+    installed: !!(window.LocalCableGuide && window.LocalCableGuide.selectProgram && window.LocalCableGuide.scrollProgramIntoView),
     errors: errors,
     title: title ? title.textContent : "",
     time: time ? time.textContent : "",
     programs: document.querySelectorAll(".program").length,
     selected: document.querySelectorAll(".program.selected").length,
     nowLine: !!document.getElementById("now-line"),
-    channels: document.querySelectorAll(".channel-cell").length
+    channels: document.querySelectorAll(".channel-cell").length,
+    hasHud: !!document.getElementById("hud"),
+    hasPlayer: !!document.getElementById("player"),
+    scrollLeft: scroller ? scroller.scrollLeft : -1
   }};
   var el = document.createElement("pre");
   el.id = "eval-report";
@@ -142,6 +167,9 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
     assert report["programs"] >= 2
     assert report["channels"] == 1
     assert report["nowLine"] is True
-    assert report["title"] == "Late Edition"
+    assert report["title"] == "Night Desk"
     assert report["time"]
     assert report["selected"] == 1
+    assert report["hasHud"] is True
+    assert report["hasPlayer"] is True
+    assert report["scrollLeft"] > 200

@@ -1,7 +1,28 @@
 # Copy to ~/.config/localcable/settings.yaml and edit the paths.
 
+# Legacy layout: each immediate subfolder of a media root is a channel.
 media_roots:
   - ~/Videos/LocalCableMedia
+
+# Jellyfin library layout (recommended). Point at the parent and LocalCable
+# finds Movies/ and Shows/ (or TV Shows/), then auto-builds genre channels
+# with invented names (Chuckle, Thunderbolt, Nightfall, Starline, …).
+# kind: auto | channels | tv | movies | jellyfin
+#   auto     — genre mix of movies + TV (default when Movies/Shows are found)
+#   tv       — one channel per series
+#   movies   — one Movies channel
+#   channels — original folder-per-channel layout
+# libraries:
+#   - path: ~/Videos
+#     kind: auto
+
+# Optional: parse loose downloads and move them into the Jellyfin layout.
+# Looks up titles on TVMaze (TV) and iTunes Search (movies) — no API key.
+library:
+  auto_channels: true
+  auto_organize: false
+  # inbox: ~/Downloads
+  fetch_metadata: true
 
 # Optional: defaults to the directory that contains this file.
 # config_dir: ~/.config/localcable
@@ -12,10 +33,24 @@ schedule:
   default_mode: sequential        # or random
 
 playback:
-  player: mpv
+  # browser = in-page player (works on other LAN computers)
+  # mpv     = local mpv window on the server
+  # both    = in-page + mpv (two audio paths — usually not what you want)
+  player: browser
   mpv_args: ["--fullscreen", "--hwdec=auto"]
-  start_from: beginning
-  # CRT / VHS look (https://ntsc.rs/). off | ntsc | vhs
+  start_from: live                # live = join at the guide's "now"; beginning = always 0:00
+
+# Rename (or fully replace) the auto genre channels.
+# Keys match a default name (Chuckle), a genre (comedy), or a channel number (6).
+lineup:
+  # Chuckle: Comedy Central
+  # Thunderbolt: TNT
+  # Nightfall: Chiller
+  # Local 8: WXYZ 8
+  # fallback: WXYZ 8
+  # channels:
+  #   - { number: 6, name: Comedy Central, genres: [comedy, sitcom] }
+  # CRT / VHS look (https://ntsc.rs/). off | ntsc | vhs  (mpv only)
   # Authentic path: install the ntscrs frei0r plugin; otherwise a 480p analog chain is used.
   filter: off
   # filter_preset: ~/presets/my-tape.json
@@ -24,11 +59,12 @@ ui:
   theme: xfinity
   banner: TV Listings             # top-right header text (try "guide")
   auto_open_browser: true         # headed mode
+  # 127.0.0.1 = this machine only. 0.0.0.0 = other devices on the LAN can open the guide.
   bind_host: 127.0.0.1
   bind_port: 8787
 
 # IR remote. If the remote already types like a keyboard (ir-keytable), leave
-# device empty — the guide and mpv already bind CH+/−, digits, OK, Esc, Info.
+# device empty — the guide HUD already binds CH+/−, digits, OK, Esc, Info.
 # Set device to grab a dedicated event node (requires the evdev extra).
 remote:
   # device: /dev/input/by-id/usb-*-event-kbd

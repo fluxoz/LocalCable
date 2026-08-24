@@ -42,6 +42,8 @@ def test_ipc_commands_loadfile_and_seek_zero():
     commands = ipc_commands_for_play(path)
     assert ["loadfile", path, "replace"] in commands
     assert ["seek", 0, "absolute"] in commands
+    live = ipc_commands_for_play(path, start_seconds=20)
+    assert ["seek", 20, "absolute"] in live
 
 
 def test_play_from_beginning_spawn_argv(tmp_path: Path):

@@ -57,6 +57,36 @@
       <span id="footer-meta"></span>
     </footer>
   </div>
+
+  <div id="stage" hidden>
+    <video id="player" playsinline preload="metadata"></video>
+    <div id="hud" hidden>
+      <div id="hud-top">
+        <span id="hud-live">On now</span>
+        <div id="hud-copy">
+          <div id="hud-title"></div>
+          <div id="hud-channel"></div>
+        </div>
+      </div>
+      <div id="hud-bottom">
+        <input id="hud-seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
+        <div id="hud-row">
+          <button type="button" id="hud-back">Guide</button>
+          <button type="button" id="hud-play">Play</button>
+          <button type="button" id="hud-restart">Start over</button>
+          <span id="hud-time">0:00 / 0:00</span>
+          <button type="button" id="hud-mute">Mute</button>
+          <input id="hud-volume" type="range" min="0" max="100" value="100" aria-label="Volume">
+          <button type="button" id="hud-ch-down">CH−</button>
+          <button type="button" id="hud-ch-up">CH+</button>
+          <button type="button" id="hud-info">Info</button>
+          <button type="button" id="hud-fs">Full</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/vendor/dash.all.min.js"></script>
   <script src="/static/guide.js"></script>
 </body>
 </html>
