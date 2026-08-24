@@ -15,12 +15,29 @@ playback:
   player: mpv
   mpv_args: ["--fullscreen", "--hwdec=auto"]
   start_from: beginning
+  # CRT / VHS look (https://ntsc.rs/). off | ntsc | vhs
+  # Authentic path: install the ntscrs frei0r plugin; otherwise a 480p analog chain is used.
+  filter: off
+  # filter_preset: ~/presets/my-tape.json
 
 ui:
   theme: xfinity
+  banner: TV Listings             # top-right header text (try "guide")
   auto_open_browser: true         # headed mode
   bind_host: 127.0.0.1
   bind_port: 8787
+
+# IR remote. If the remote already types like a keyboard (ir-keytable), leave
+# device empty — the guide and mpv already bind CH+/−, digits, OK, Esc, Info.
+# Set device to grab a dedicated event node (requires the evdev extra).
+remote:
+  # device: /dev/input/by-id/usb-*-event-kbd
+  digit_timeout_ms: 1400
+
+# Cover art. Drop show.jpg next to a video, or poster.jpg in a channel folder.
+# With fetch: true, missing art is looked up on TVMaze / iTunes (no API key) and cached.
+artwork:
+  fetch: true
 
 # File in the config directory (PNG/SVG/JPG). Served top-left of the guide.
 logo: provider_logo.png

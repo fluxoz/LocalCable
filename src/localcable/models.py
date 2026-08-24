@@ -58,6 +58,7 @@ class ScheduledProgram:
             "end_time": self.end_time.isoformat(),
             "channel_number": self.channel_number,
             "channel_name": self.channel_name,
+            "art": f"/art/{self.id}",
         }
 
 

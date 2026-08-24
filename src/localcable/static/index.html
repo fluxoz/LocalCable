@@ -12,7 +12,7 @@
       <div id="header-top">
         <img id="provider-logo" src="/logo" alt="Provider logo">
         <div id="header-labels">
-          <span id="header-label">TV Listings</span>
+          <span id="header-label" class="with-mail">TV Listings</span>
           <span id="clock" aria-live="polite"></span>
         </div>
       </div>
@@ -27,8 +27,14 @@
           <p id="detail-description">Point LocalCable at a media folder. Each subfolder becomes a channel.</p>
           <button type="button" id="play-button" disabled>Watch</button>
         </div>
-        <div id="detail-thumb" aria-hidden="true">
+        <div id="detail-thumb">
           <div class="thumb-placeholder">TV</div>
+          <img id="detail-art" alt="" hidden>
+          <div id="video-overlay" hidden>
+            <span id="video-overlay-live">On now</span>
+            <div id="video-overlay-title"></div>
+            <div id="video-overlay-channel"></div>
+          </div>
         </div>
       </section>
     </header>
@@ -47,7 +53,7 @@
     </div>
 
     <footer id="guide-footer">
-      <span id="footer-status">Click a program to select · Watch or double-click to play in mpv</span>
+      <span id="footer-status">Arrows move · OK/Enter watch · Esc guide · CH+/− or numbers tune · i info</span>
       <span id="footer-meta"></span>
     </footer>
   </div>

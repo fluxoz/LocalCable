@@ -4,17 +4,56 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from localcable.crt import find_frei0r_ntscrs, mpv_filter_args, normalize_filter
+
 log = logging.getLogger(__name__)
 
-DEFAULT_BASE_ARGS = ["--idle=yes", "--force-window=yes", "--keep-open=yes"]
+PACKAGE_DIR = Path(__file__).resolve().parent
+MPV_SCRIPT = PACKAGE_DIR / "mpv" / "localcable.lua"
+SHOW_GUIDE_HELPER = PACKAGE_DIR / "mpv" / "show_guide.py"
+DEFAULT_BASE_ARGS = [
+    "--idle=yes",
+    "--force-window=yes",
+    "--keep-open=yes",
+    "--osc=no",
+    "--osd-bar=no",
+]
+DEFAULT_GUIDE_URL = "http://127.0.0.1:8787"
+
+
+def default_guide_env(
+    guide_url: str | None = None,
+    osd_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Env so the mpv lua script can raise the guide without changing the player."""
+    env = {
+        "LOCALCABLE_GUIDE_URL": (guide_url or DEFAULT_GUIDE_URL).rstrip("/"),
+        "LOCALCABLE_SHOW_GUIDE": str(SHOW_GUIDE_HELPER),
+        "LOCALCABLE_PYTHON": sys.executable,
+    }
+    if osd_path:
+        env["LOCALCABLE_OSD_PATH"] = str(osd_path)
+    return env
+
+
+def _script_args(extra: list[str]) -> list[str]:
+    if not MPV_SCRIPT.is_file():
+        return []
+    marker = str(MPV_SCRIPT)
+    for arg in extra:
+        if arg == f"--script={marker}" or arg.endswith("localcable.lua"):
+            return []
+    return [f"--script={marker}"]
 
 
 class MpvError(Exception):
@@ -57,26 +96,34 @@ def build_mpv_argv(
     file_path: str,
     socket_path: str | Path,
     extra_args: list[str] | None = None,
+    *,
+    filter_mode: str = "off",
+    filter_preset: str | Path | None = None,
 ) -> list[str]:
     """Argv that starts mpv on *file_path* from the beginning, with IPC enabled."""
     extra = [str(a) for a in (extra_args or [])]
+    mode = normalize_filter(filter_mode)
+    filt = mpv_filter_args(mode, explicit_preset=filter_preset)
     return [
         "mpv",
         f"--input-ipc-server={socket_path}",
         *DEFAULT_BASE_ARGS,
+        *_script_args(extra),
         *extra,
+        *filt,
         "--",
         str(file_path),
     ]
 
 
-def _default_popen(argv: list[str], **_kwargs: Any) -> subprocess.Popen:
+def _default_popen(argv: list[str], **kwargs: Any) -> subprocess.Popen:
     return subprocess.Popen(
         argv,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
         start_new_session=True,
+        env=kwargs.get("env"),
     )
 
 
@@ -91,17 +138,45 @@ class MpvController:
         popen: Callable[..., Any] | None = None,
         which: Callable[[str], str | None] | None = None,
         sleep: Callable[[float], None] | None = None,
+        extra_env: dict[str, str] | None = None,
+        guide_url: str | None = None,
+        osd_path: str | Path | None = None,
+        filter_mode: str = "off",
+        filter_preset: str | Path | None = None,
     ) -> None:
         self.socket_path = Path(socket_path)
         self.extra_args = list(extra_args or [])
+        self.filter_mode = normalize_filter(filter_mode)
+        self.filter_preset = filter_preset
         self._popen = popen or _default_popen
         self._which = which or shutil.which
         self._sleep = sleep or time.sleep
         self._proc: Any | None = None
         self._sock: socket.socket | None = None
+        env = default_guide_env(guide_url, osd_path)
+        if extra_env:
+            env.update(extra_env)
+        plugin = find_frei0r_ntscrs(env)
+        if plugin is not None:
+            folder = str(plugin.parent)
+            existing = env.get("FREI0R_PATH", "")
+            if folder not in existing.split(":"):
+                env["FREI0R_PATH"] = f"{folder}:{existing}" if existing else folder
+        self.extra_env = env
+
+    def _child_env(self) -> dict[str, str]:
+        merged = os.environ.copy()
+        merged.update(self.extra_env)
+        return merged
 
     def build_argv(self, file_path: str) -> list[str]:
-        return build_mpv_argv(file_path, self.socket_path, self.extra_args)
+        return build_mpv_argv(
+            file_path,
+            self.socket_path,
+            self.extra_args,
+            filter_mode=self.filter_mode,
+            filter_preset=self.filter_preset,
+        )
 
     def play_file(self, file_path: str | Path) -> PlayResult:
         """Play *file_path* from the beginning. Prefers IPC; otherwise spawns mpv."""
@@ -121,8 +196,19 @@ class MpvController:
         self._cleanup_socket()
         exec_argv = [binary, *argv[1:]]
         log.info("starting mpv: %s", " ".join(exec_argv))
-        self._proc = self._popen(exec_argv)
+        self._proc = self._popen(exec_argv, env=self._child_env())
         return PlayResult(path=path, argv=exec_argv, method="spawn", ipc_commands=commands)
+
+    def send_command(self, command: list[Any]) -> bool:
+        """Best-effort IPC command (OSD / script-message). Never required for play."""
+        try:
+            sock = self._sock if self._sock is not None else self._connect()
+            self._send(sock, command)
+            self._sock = sock
+            return True
+        except OSError:
+            self._close_ipc()
+            return False
 
     def _try_ipc(self, path: str) -> bool:
         try:

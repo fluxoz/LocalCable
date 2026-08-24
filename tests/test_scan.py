@@ -55,3 +55,20 @@ def test_playlist_txt_order(media_root: Path):
     assert hist.playlist is not None
     names = [p.name for p in hist.playlist]
     assert names == ["beta.mp4", "alpha.mp4"]
+
+
+def test_empty_folder_is_still_a_channel(tmp_path: Path):
+    root = tmp_path / "media"
+    (root / "101_CNN").mkdir(parents=True)
+    (root / "Weather").mkdir(parents=True)
+    (root / "205_HBO").mkdir(parents=True)
+    channels = scan_media_root(root)
+    by_name = {ch.name: ch for ch in channels}
+    assert set(by_name) == {"CNN", "Weather", "HBO"}
+    assert by_name["CNN"].number == 101
+    assert by_name["CNN"].media == []
+    assert by_name["HBO"].number == 205
+    assert by_name["HBO"].media == []
+    assert by_name["Weather"].number == 1
+    assert by_name["Weather"].media == []
+    assert [ch.number for ch in channels] == [1, 101, 205]

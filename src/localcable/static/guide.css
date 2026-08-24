@@ -73,7 +73,7 @@ html, body {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
 }
 
-#header-label::before {
+#header-label.with-mail::before {
   content: "✉ ";
   font-size: 16px;
 }
@@ -183,7 +183,23 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
+
+#detail-thumb.is-live {
+  border-color: #f5c518;
+}
+
+#detail-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+#detail-art[hidden] { display: none; }
 
 .thumb-placeholder {
   width: 100%;
@@ -198,6 +214,54 @@ html, body {
   background:
     repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 4px),
     linear-gradient(135deg, #123866, #1a5a9a);
+}
+
+#video-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 8px 10px 10px;
+  background:
+    linear-gradient(180deg, rgba(6, 24, 56, 0.15) 20%, rgba(6, 24, 56, 0.88) 100%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.04) 0 2px, transparent 2px 4px),
+    linear-gradient(135deg, #0b3a72, #1a5a9a);
+  color: #fff;
+}
+
+#video-overlay[hidden] { display: none; }
+
+#video-overlay-live {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: #e12626;
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+
+#video-overlay-title {
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+#video-overlay-channel {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #d5e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .time-nav {
@@ -313,6 +377,12 @@ html, body {
 
 .channel-cell:nth-child(even) { background: var(--channel-bg-alt); }
 
+.channel-cell.selected {
+  outline: 2px solid var(--selected);
+  outline-offset: -2px;
+  background: #1d6ad0;
+}
+
 .ch-num {
   font-size: 16px;
   min-width: 2.2em;
@@ -370,6 +440,16 @@ html, body {
   color: var(--selected-text);
   z-index: 2;
   box-shadow: inset 0 0 0 2px #fff3a8;
+}
+
+.program.no-media {
+  background: transparent;
+  color: var(--muted);
+  font-weight: 400;
+  font-style: italic;
+  cursor: default;
+  border-right: 0;
+  pointer-events: none;
 }
 
 #now-line {

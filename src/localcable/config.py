@@ -9,10 +9,22 @@ from typing import Any
 
 import yaml
 
+from localcable.crt import normalize_filter
+
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "localcable"
 DEFAULT_BIND_HOST = "127.0.0.1"
 DEFAULT_BIND_PORT = 8787
 DEFAULT_LOGO_FILENAME = "provider_logo.png"
+DEFAULT_BANNER = "TV Listings"
+
+
+def banner_text(value: Any, default: str = DEFAULT_BANNER) -> str:
+    text = str(value if value is not None else default).strip()
+    if not text:
+        return default
+    if len(text) > 80:
+        return text[:80].rstrip()
+    return text
 
 
 @dataclass
@@ -28,6 +40,8 @@ class PlaybackConfig:
     mpv_args: list[str] = field(default_factory=lambda: ["--fullscreen", "--hwdec=auto"])
     start_from: str = "beginning"
     ipc_socket: str | None = None
+    filter: str = "off"
+    filter_preset: str | None = None
 
 
 @dataclass
@@ -36,6 +50,22 @@ class UiConfig:
     auto_open_browser: bool = True
     bind_host: str = DEFAULT_BIND_HOST
     bind_port: int = DEFAULT_BIND_PORT
+    banner: str = DEFAULT_BANNER
+
+
+@dataclass
+class RemoteConfig:
+    """IR remote. Empty device = keyboard-style remotes (ir-keytable) only."""
+
+    device: str | None = None
+    digit_timeout_ms: int = 1400
+
+
+@dataclass
+class ArtworkConfig:
+    """Cover art. User sidecars always win; online fetch is keyless and optional."""
+
+    fetch: bool = True
 
 
 @dataclass
@@ -45,6 +75,8 @@ class AppConfig:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     playback: PlaybackConfig = field(default_factory=PlaybackConfig)
     ui: UiConfig = field(default_factory=UiConfig)
+    remote: RemoteConfig = field(default_factory=RemoteConfig)
+    artwork: ArtworkConfig = field(default_factory=ArtworkConfig)
     logo_filename: str = DEFAULT_LOGO_FILENAME
 
     @property
@@ -58,8 +90,18 @@ class AppConfig:
         return Path(self.config_dir) / "mpv.sock"
 
     @property
+    def public_base_url(self) -> str:
+        host = self.ui.bind_host
+        shown = "127.0.0.1" if host in {"0.0.0.0", "::", "[::]"} else host
+        return f"http://{shown}:{int(self.ui.bind_port)}"
+
+    @property
     def cache_dir(self) -> Path:
         return Path(self.config_dir) / "cache"
+
+    @property
+    def osd_path(self) -> Path:
+        return Path(self.config_dir) / "osd.json"
 
 
 def _as_path(value: Any) -> Path:
@@ -134,6 +176,8 @@ def load_config(
     sched_raw = raw.get("schedule") or {}
     play_raw = raw.get("playback") or {}
     ui_raw = raw.get("ui") or {}
+    remote_raw = raw.get("remote") or {}
+    art_raw = raw.get("artwork") or {}
 
     schedule = ScheduleConfig(
         window_hours_before=float(sched_raw.get("window_hours_before", 6)),
@@ -143,18 +187,28 @@ def load_config(
     mpv_args = play_raw.get("mpv_args", ["--fullscreen", "--hwdec=auto"])
     if isinstance(mpv_args, str):
         mpv_args = [mpv_args]
+    preset = play_raw.get("filter_preset")
     playback = PlaybackConfig(
         player=str(play_raw.get("player", "mpv")),
         mpv_args=list(mpv_args),
         start_from=str(play_raw.get("start_from", "beginning")),
         ipc_socket=play_raw.get("ipc_socket"),
+        filter=normalize_filter(play_raw.get("filter", "off")),
+        filter_preset=str(preset) if preset else None,
     )
     ui = UiConfig(
         theme=str(ui_raw.get("theme", "xfinity")),
         auto_open_browser=bool(ui_raw.get("auto_open_browser", True)),
         bind_host=str(ui_raw.get("bind_host", DEFAULT_BIND_HOST)),
         bind_port=int(ui_raw.get("bind_port", DEFAULT_BIND_PORT)),
+        banner=banner_text(ui_raw.get("banner", DEFAULT_BANNER)),
     )
+    device = remote_raw.get("device")
+    remote = RemoteConfig(
+        device=str(device) if device else None,
+        digit_timeout_ms=int(remote_raw.get("digit_timeout_ms", 1400)),
+    )
+    artwork = ArtworkConfig(fetch=bool(art_raw.get("fetch", True)))
     logo_filename = str(raw.get("logo", DEFAULT_LOGO_FILENAME))
 
     config = AppConfig(
@@ -163,6 +217,8 @@ def load_config(
         schedule=schedule,
         playback=playback,
         ui=ui,
+        remote=remote,
+        artwork=artwork,
         logo_filename=logo_filename,
     )
     return apply_cli_overrides(config, args)
