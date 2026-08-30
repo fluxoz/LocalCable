@@ -109,6 +109,42 @@ def test_random_packs_by_duration_without_gaps(media_root: Path, frozen_now: dat
     assert any(p.start_time <= now < p.end_time for p in programs)
 
 
+def test_random_padded_clones_get_distinct_schedules(tmp_path: Path, frozen_now: datetime):
+    """Genre channels and their padded clones share folder_path + media; each must
+    still get a unique random shuffle instead of identical repeated programming."""
+    from localcable.models import MediaFile
+    from localcable.scan import pad_channels
+
+    root = tmp_path / "lib"
+    media = [
+        MediaFile(path=root / f"{i}.mp4", title=f"C{i}", duration_seconds=60.0)
+        for i in range(6)
+    ]
+    base = Channel(
+        number=6,
+        name="Chuckle",
+        folder_path=root,
+        media=media,
+        schedule_mode="random",
+    )
+    channels = pad_channels([base], 4)
+    assert len(channels) == 4
+
+    schedule = generate_schedule(
+        channels,
+        now=frozen_now,
+        window_hours_before=_window_hours(0),
+        window_hours_after=_window_hours(600),
+    )
+    orders = []
+    for ch in schedule.channels:
+        assert ch.schedule_mode == "random"
+        assert ch.programs
+        orders.append(tuple(p.title for p in ch.programs))
+    # Every clone shares the same media + folder_path, but the schedules must differ.
+    assert len(set(orders)) == len(orders)
+
+
 def test_unnumbered_channel_appears_in_schedule(media_root: Path, frozen_now: datetime):
     channels = scan_media_root(media_root)
     schedule = generate_schedule(
