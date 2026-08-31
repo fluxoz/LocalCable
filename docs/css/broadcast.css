@@ -577,7 +577,7 @@ html.they-live #osd { color: #fff; }
   filter: drop-shadow(2px 2px 0 #000);
 }
 
-#signoff h2, #hero h2, #infomercial h2 {
+#signoff h2, #hero h2, #infomercial h2, #almost h2 {
   font-family: var(--font-news);
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1039,13 +1039,116 @@ html.they-live #guide-set {
 }
 
 /* Packages */
-#packages, #features, #glasses-ad, #billboard, #infomercial, #signoff, #living {
+#packages, #features, #glasses-ad, #billboard, #infomercial, #signoff, #living, #almost {
   scroll-margin-top: 8px;
 }
 
 #packages, #features, #glasses-ad {
   padding: 96px 24px 32px;
   background: #07060a;
+}
+
+#almost {
+  min-height: 100vh;
+  padding: 96px 186px 110px 24px;
+  background:
+    linear-gradient(180deg, rgba(7, 6, 10, 0.7), rgba(7, 6, 10, 0.88)),
+    url("../assets/static.jpg") center / cover;
+}
+
+.spot {
+  max-width: 780px;
+  margin: 0 auto;
+  background: rgba(5, 3, 8, 0.88);
+  border: 2px solid var(--gold);
+  padding: 28px 24px 22px;
+  box-shadow: 8px 8px 0 #000;
+}
+
+#almost h2 {
+  font-family: var(--font-truth);
+  font-size: clamp(40px, 8vw, 78px);
+  line-height: 0.9;
+  letter-spacing: 0.02em;
+  margin: 8px 0 6px;
+  text-shadow:
+    3px 0 rgba(255, 43, 214, 0.35),
+    -3px 0 rgba(0, 232, 255, 0.35);
+}
+
+.spot-tag {
+  font-family: var(--font-news);
+  letter-spacing: 0.12em;
+  font-size: clamp(20px, 3vw, 28px);
+  margin: 0 0 22px;
+  color: var(--gold);
+}
+
+.spot-tag em { font-style: normal; color: var(--paper); }
+
+.spot-script { margin: 0; }
+
+.spot-script > div {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 14px;
+  padding: 11px 0;
+  border-top: 1px solid #2a2a30;
+  align-items: baseline;
+}
+
+.spot-script dt {
+  font-family: var(--font-news);
+  letter-spacing: 0.16em;
+  color: var(--sodium);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.spot-script dd {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.4;
+  color: #e8e2d6;
+}
+
+.spot-script .come-on dd {
+  font-family: var(--font-news);
+  letter-spacing: 0.08em;
+  font-size: 28px;
+  color: var(--paper);
+}
+
+.spot-script .yell dd {
+  font-family: var(--font-truth);
+  font-size: clamp(36px, 7vw, 64px);
+  letter-spacing: 0.04em;
+  line-height: 0.9;
+  color: #fff;
+  text-shadow:
+    3px 0 rgba(255, 43, 214, 0.4),
+    -3px 0 rgba(0, 232, 255, 0.4);
+}
+
+.spot-vo {
+  margin: 22px 0 0;
+  font-family: var(--font-news);
+  letter-spacing: 0.08em;
+  font-size: 16px;
+  color: var(--sodium);
+  line-height: 1.4;
+}
+
+.pharma {
+  margin: 20px 0 0;
+  font-size: 9px;
+  line-height: 1.45;
+  color: #8a8680;
+  letter-spacing: 0.02em;
+  max-height: 8.2em;
+  overflow: auto;
+  border-top: 1px solid #2a2a30;
+  padding-top: 12px;
 }
 
 .sec-kicker {
@@ -1366,6 +1469,7 @@ kbd {
   .ident-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92vw; margin: 0 auto; }
   #deck button, .deck-link { padding: 5px 7px; font-size: 10px; }
   .lower-third { margin: 0 0 48px; }
+  #almost { padding: 96px 16px 96px; }
 }
 
 @media (max-width: 640px) {
@@ -1380,6 +1484,9 @@ kbd {
   #header-labels { gap: 8px; }
   #guide-clock { font-size: 16px; }
   .ident-banner .bars, .ident-banner .cg, .ident-meta { display: none; }
+  .spot-script > div { grid-template-columns: 44px 1fr; gap: 10px; }
+  .spot-script dd { font-size: 16px; }
+  .pharma { max-height: 6.5em; }
 }
 
 @media (prefers-reduced-motion: reduce) {
