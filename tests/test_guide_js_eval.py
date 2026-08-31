@@ -173,3 +173,91 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
     assert report["hasHud"] is True
     assert report["hasPlayer"] is True
     assert report["scrollLeft"] > 200
+
+
+@pytest.mark.skipif(_chromium() is None, reason="chromium not installed")
+def test_guide_js_auto_advances_on_media_end(tmp_path: Path):
+    js = (STATIC / "guide.js").read_text(encoding="utf-8")
+    html_src = (STATIC / "index.html").read_text(encoding="utf-8")
+    html_src = re.sub(r'<script src="/static/guide.js"></script>', "", html_src)
+    html_src = html_src.replace(
+        '<link rel="stylesheet" href="/static/guide.css">',
+        "<style>" + (STATIC / "guide.css").read_text(encoding="utf-8") + "</style>",
+    )
+    payload = json.dumps(SCHEDULE)
+    boot = f"""
+<script>
+window.LocalCableSkipAutoLoad = true;
+window.__pageErrors = [];
+window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
+</script>
+<script>
+{js}
+</script>
+<script>
+(function () {{
+  var errors = window.__pageErrors.slice();
+  var guide = window.LocalCableGuide;
+  var state = guide.getState();
+  var nextTitle = "";
+  var advancedTitle = "";
+  try {{
+    guide.render({payload});
+    var late = guide.getState().programs["p-late"];
+    var computed = guide.nextProgram(late);
+    nextTitle = computed ? computed.title : "";
+    // Simulate watching p-late, then the media file finishing.
+    guide.selectProgram("p-late");
+    guide.enterWatching(late);
+    var video = document.getElementById("player");
+    video.dispatchEvent(new Event("ended"));
+    var advanced = guide.getState().selectedId;
+    var prog = guide.getState().programs[advanced];
+    advancedTitle = prog ? prog.title : "";
+  }} catch (err) {{
+    errors.push(String(err));
+  }}
+  var report = {{
+    errors: errors,
+    nextTitle: nextTitle,
+    advancedTitle: advancedTitle,
+  }};
+  var el = document.createElement("pre");
+  el.id = "eval-report";
+  el.textContent = JSON.stringify(report);
+  document.body.appendChild(el);
+}})();
+</script>
+"""
+    html_src = html_src.replace("</body>", boot + "</body>")
+    page = tmp_path / "guide.html"
+    page.write_text(html_src, encoding="utf-8")
+
+    profile = tmp_path / "chrome-profile"
+    profile.mkdir()
+    proc = subprocess.run(
+        [
+            _chromium(),
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            f"--user-data-dir={profile}",
+            "--window-size=1400,900",
+            "--virtual-time-budget=3000",
+            "--dump-dom",
+            str(page),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr[-1000:]
+    match = re.search(r'<pre id="eval-report">([^<]+)</pre>', proc.stdout)
+    assert match, proc.stdout[-2000:]
+    report = json.loads(match.group(1).replace("&quot;", '"'))
+    assert report["errors"] == []
+    assert report["nextTitle"] == "Night Desk"
+    assert report["advancedTitle"] == "Night Desk"
+
