@@ -229,11 +229,11 @@
     var stage = $("stage");
     if (stage) {
       stage.addEventListener("click", function (event) {
-        if (!state.watching) {
-          if (state.dashOn) enterWatching(currentProgram());
+        if (event.target && event.target.closest && event.target.closest("#hud-row, #hud-seek, #hud-volume")) {
           return;
         }
-        if (event.target && event.target.closest && event.target.closest("#hud-row, #hud-seek, #hud-volume")) {
+        if (!state.watching) {
+          if (state.dashOn) enterWatching(currentProgram());
           return;
         }
         togglePlay();

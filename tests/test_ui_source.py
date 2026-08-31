@@ -110,6 +110,19 @@ def test_js_is_browser_script_without_node_modules():
     assert "playProgram" in on_key
 
 
+def test_stage_click_ignores_hud_controls_before_reentering_watching():
+    """The stage click handler must skip HUD-control clicks (e.g. the Guide
+    button) before the not-watching branch, otherwise the bubbled click would
+    re-enter the large player right after returnToGuide() shrank it."""
+    js = (STATIC / "guide.js").read_text(encoding="utf-8")
+    handler = js.split('stage.addEventListener("click"', 1)[1].split("});", 1)[0]
+    guard = handler.find('closest("#hud-row')
+    reenter = handler.find("enterWatching(currentProgram())")
+    assert guard != -1, "stage click handler lost its HUD-control guard"
+    assert reenter != -1, "stage click handler lost its watch re-entry"
+    assert guard < reenter, "HUD-control guard must run before re-entering watching"
+
+
 def test_mpv_esc_script_only_runs_helper():
     lua = (STATIC.parent / "mpv" / "localcable.lua").read_text(encoding="utf-8")
     helper = (STATIC.parent / "mpv" / "show_guide.py").read_text(encoding="utf-8")
