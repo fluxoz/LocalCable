@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="56" viewBox="0 0 320 56" role="img" aria-label="LocalCable">
+  <rect x="0" y="10" width="38" height="36" rx="6" fill="#e31c3d"/>
+  <text x="19" y="35" text-anchor="middle" fill="#ffffff" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="13" font-weight="700">TV</text>
+  <text x="48" y="40" fill="#ffffff" font-family="Georgia, 'Times New Roman', Times, serif" font-style="italic" font-weight="700" font-size="34">LocalCable</text>
+</svg>

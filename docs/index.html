@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LocalCable — This Is Your Cable</title>
+  <meta name="description" content="LocalCable turns a folder of videos into a living cable-TV guide. Offline-first on Linux. Point it at a library. The rest is television.">
+  <link rel="canonical" href="https://fluxoz.github.io/LocalCable/">
+  <meta name="theme-color" content="#050308">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="LocalCable — This Is Your Cable">
+  <meta property="og:description" content="Point it at a folder. Each subfolder becomes a channel. The guide never sleeps.">
+  <meta property="og:url" content="https://fluxoz.github.io/LocalCable/">
+  <meta property="og:image" content="https://fluxoz.github.io/LocalCable/assets/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="LocalCable — This Is Your Cable">
+  <meta name="twitter:image" content="https://fluxoz.github.io/LocalCable/assets/og.jpg">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Sans:wght@400;600;700&family=Oswald:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/broadcast.css">
+</head>
+<body>
+  <a class="skip" href="#broadcast">Skip to program</a>
+
+  <div class="bezel" aria-hidden="true"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <div class="tracking" aria-hidden="true"></div>
+  <div class="phosphor" aria-hidden="true"></div>
+
+  <div id="boot" role="dialog" aria-label="Tune in">
+    <canvas id="snow" aria-hidden="true"></canvas>
+    <div class="boot-copy">
+      <div class="bars boot-bars" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <p class="boot-kicker">PUBLIC ACCESS · CHANNEL 03</p>
+      <p id="boot-status">SEARCHING FOR SIGNAL</p>
+      <p class="boot-hint">Press any key · click to lock</p>
+    </div>
+  </div>
+
+  <header id="osd">
+    <div class="osd-left">
+      <span class="rec" title="Recording the overnight">REC</span>
+      <time id="timestamp" datetime="">--:--:--</time>
+    </div>
+    <div class="osd-right">
+      <span class="play-bug">▶ PLAY</span>
+      <span class="ch-bug" id="ch-bug">CH 03&nbsp;&nbsp;LOCAL</span>
+    </div>
+  </header>
+
+  <div id="channel-flash" hidden aria-live="polite">03</div>
+
+  <div id="truth" aria-hidden="true">
+    <p class="truth-obey">OBEY</p>
+    <p class="truth-watch">WATCH TV</p>
+    <p class="truth-consume">CONSUME</p>
+    <p class="truth-cable">THIS IS YOUR CABLE</p>
+    <p class="truth-sleep">NO CLOUD</p>
+    <p class="truth-think">NO INDEPENDENT THOUGHT</p>
+  </div>
+
+  <div id="ticker">
+    <span class="live-pill">LIVE</span>
+    <div class="ticker-mask">
+      <div class="ticker-track" id="ticker-track"></div>
+    </div>
+  </div>
+
+  <div id="deck">
+    <button type="button" id="btn-sound" aria-pressed="false" title="Tape hiss and 60Hz hum">
+      <span class="deck-label">SPEAKER</span>
+      <span class="deck-state" id="sound-state">MUTE</span>
+    </button>
+    <button type="button" id="btn-glasses" aria-pressed="false" title="Put on the glasses">
+      <span class="deck-label">GLASSES</span>
+      <span class="deck-state" id="glasses-state">OFF</span>
+    </button>
+    <a class="deck-link" href="https://github.com/fluxoz/LocalCable">SOURCE</a>
+  </div>
+
+  <aside id="remote" aria-label="Cable remote">
+    <div class="remote-brand">LOCALCABLE</div>
+    <button type="button" class="remote-pwr" data-act="power" title="Color bars">PWR</button>
+    <div class="remote-pad">
+      <button type="button" data-digit="1">1</button>
+      <button type="button" data-digit="2">2</button>
+      <button type="button" data-digit="3">3</button>
+      <button type="button" data-digit="4">4</button>
+      <button type="button" data-digit="5">5</button>
+      <button type="button" data-digit="6">6</button>
+      <button type="button" data-digit="7">7</button>
+      <button type="button" data-digit="8">8</button>
+      <button type="button" data-digit="9">9</button>
+      <button type="button" data-act="guide">GDE</button>
+      <button type="button" data-digit="0">0</button>
+      <button type="button" data-act="ok">OK</button>
+    </div>
+    <div class="remote-row">
+      <button type="button" data-act="ch-">CH−</button>
+      <button type="button" data-act="ch+">CH+</button>
+    </div>
+    <div class="remote-row">
+      <button type="button" data-act="glasses">GLS</button>
+      <button type="button" data-act="info">INFO</button>
+    </div>
+  </aside>
+
+  <button type="button" id="remote-toggle" aria-expanded="false" aria-controls="remote">REMOTE</button>
+
+  <main id="broadcast">
+    <section id="hero" class="block">
+      <div class="hero-still ken" style="background-image:url('assets/night-street.jpg')"></div>
+      <div class="hero-grade"></div>
+      <div class="ident-banner">
+        <div class="bars ident-bars" aria-hidden="true">
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <p class="cg">THE FOLLOWING PROGRAM IS A LOCAL ORIGINATION</p>
+        <img class="wordmark" src="assets/logo.svg" width="320" height="56" alt="LocalCable">
+        <p class="ident-meta">CH 03 LOCAL ACCESS &nbsp;·&nbsp; STEREO &nbsp;·&nbsp; CC &nbsp;·&nbsp; TV-G &nbsp;·&nbsp; OFFLINE FIRST</p>
+      </div>
+      <div class="chyron">
+        <div class="chyron-top">
+          <span class="live-pill">LIVE</span>
+          <span class="chyron-where">VALLEY — OVERNIGHT</span>
+          <span class="chyron-clock" id="hero-clock">--:--</span>
+        </div>
+        <h2>THIS IS YOUR CABLE</h2>
+        <p class="lede">Point it at a folder. Each subfolder becomes a channel. Files become programs on a rolling timeline. Click a block — you join the show already in progress.</p>
+        <div class="hero-actions">
+          <a class="btn gold" href="#guide">TONIGHT’S GUIDE</a>
+          <a class="btn ghost" href="https://github.com/fluxoz/LocalCable">GITHUB</a>
+        </div>
+      </div>
+      <p class="lower-third">BREAKING &nbsp;·&nbsp; HARD DRIVE CONVERTED TO CABLE SYSTEM &nbsp;·&nbsp; NO ACCOUNT REQUIRED</p>
+    </section>
+
+    <section id="guide" class="block">
+      <div id="guide-set">
+        <header id="guide-header">
+          <div id="header-top">
+            <img id="provider-logo" src="assets/logo.svg" alt="LocalCable">
+            <div id="header-labels">
+              <span id="header-label" class="with-mail">TV Listings</span>
+              <span id="guide-clock"></span>
+            </div>
+          </div>
+          <section id="detail-panel" aria-live="polite">
+            <div id="detail-main">
+              <div id="detail-title-row">
+                <h3 id="detail-title">Select a program</h3>
+                <span id="detail-channel"></span>
+                <span id="detail-rating">TV-G</span>
+              </div>
+              <div id="detail-time">Arrows move · OK watches · digits tune · G guide · S glasses</div>
+              <p id="detail-description">A living electronic program guide for your own media. Highlight a block.</p>
+              <button type="button" id="play-button">Watch</button>
+            </div>
+            <div id="detail-thumb">
+              <div class="thumb-placeholder" id="thumb-copy">TV</div>
+            </div>
+          </section>
+        </header>
+        <div id="guide-body">
+          <div id="grid-scroll">
+            <div id="time-bar-label">Today</div>
+            <div id="time-axis"></div>
+            <div id="channel-column"></div>
+            <div id="program-grid">
+              <div id="now-line"></div>
+            </div>
+          </div>
+        </div>
+        <footer id="guide-footer">
+          <span>Arrows move · OK/Enter watch · digits tune · CH+/− surf · S glasses · M speaker</span>
+          <span id="footer-meta">LOCAL 3 EPG</span>
+        </footer>
+      </div>
+    </section>
+
+    <section id="packages" class="block">
+      <header class="sec-kicker">
+        <span class="live-pill">LIVE</span>
+        <span>FIELD REPORTS · LOCAL 3 NEWS</span>
+      </header>
+
+      <article class="package" id="pkg-business">
+        <div class="pkg-still ken" style="background-image:url('assets/news-van.jpg')"></div>
+        <div class="pkg-chyron">
+          <p class="pkg-eyebrow">THE BUSINESS</p>
+          <h3>IF IT PLAYS, IT LEADS</h3>
+          <p>Playback joins at the guide’s current time. A show that started at 4:00 starts twenty minutes in at 4:20. <em>Start over</em> on the HUD plays from 0:00. Video plays in the page — H.264 MP4 over HTTP Range, everything else packaged as MPEG-DASH. Optional mpv on the server.</p>
+        </div>
+      </article>
+
+      <article class="package" id="pkg-overnight">
+        <div class="pkg-still ken alt" style="background-image:url('assets/parking.jpg')"></div>
+        <div class="pkg-chyron">
+          <p class="pkg-eyebrow">OVERNIGHT SHIFT</p>
+          <h3>THE GRID NEVER STOPS</h3>
+          <p>Real durations from ffprobe. A rolling window from now − 6 hours through now + 18. Sequential loops a playlist; random shuffles the library. Adjacent blocks abut. There are no commercial gaps unless you put commercials in the folder.</p>
+        </div>
+      </article>
+
+      <article class="package" id="pkg-access">
+        <div class="pkg-still ken" style="background-image:url('assets/studio.jpg')"></div>
+        <div class="pkg-chyron">
+          <p class="pkg-eyebrow">PUBLIC ACCESS</p>
+          <h3>YOUR FOLDER IS A CHANNEL</h3>
+          <p>Classic channel folders still work. A Jellyfin parent with Movies/ and Shows/ is detected and mixed onto genre cable channels with invented names — Nightfall, Thunderbolt, Chuckle, Starline, Toonbox, Prime, Local 8. No account. No cloud. Offline-first on Linux.</p>
+        </div>
+      </article>
+    </section>
+
+    <section id="features" class="block">
+      <header class="sec-kicker">
+        <span class="live-pill dim">SYS</span>
+        <span>TECHNICAL · WHAT’S ON THE WIRE</span>
+      </header>
+      <ul class="wire">
+        <li>
+          <span class="wire-ch">07</span>
+          <span class="wire-name">CRT / VHS</span>
+          <span class="wire-copy">ntsc-rs look. NTSC composite or tape. HUD checkbox. CSS filter in-page so NFS stays fast.</span>
+        </li>
+        <li>
+          <span class="wire-ch">12</span>
+          <span class="wire-name">IR REMOTE</span>
+          <span class="wire-copy">Arrows, OK, Esc, CH+/−, digits with cable-style timeout. Optional evdev grab.</span>
+        </li>
+        <li>
+          <span class="wire-ch">18</span>
+          <span class="wire-name">LAN WATCH</span>
+          <span class="wire-copy">Bind 0.0.0.0. dash.js is vendored. A laptop on the same Wi-Fi opens the guide and watches.</span>
+        </li>
+        <li>
+          <span class="wire-ch">24</span>
+          <span class="wire-name">ART &amp; NFO</span>
+          <span class="wire-copy">Local posters first. Optional keyless TVMaze / iTunes lookups, cached.</span>
+        </li>
+        <li>
+          <span class="wire-ch">31</span>
+          <span class="wire-name">ORGANIZE</span>
+          <span class="wire-copy">Loose filenames parsed, looked up, moved into a Jellyfin layout. Existing files never overwritten.</span>
+        </li>
+        <li>
+          <span class="wire-ch">36</span>
+          <span class="wire-name">HEADED / HEADLESS</span>
+          <span class="wire-copy">One FastAPI process. Opens a browser, or serves the same page on a box with no display.</span>
+        </li>
+      </ul>
+    </section>
+
+    <section id="billboard" class="block">
+      <div class="bb-still ken" style="background-image:url('assets/billboard.jpg')"></div>
+      <div class="bb-still they" style="background-image:url('assets/they-live.jpg')"></div>
+      <div class="bb-copy">
+        <p class="bb-false">LOCALCABLE</p>
+        <p class="bb-false sub">YOUR FOLDER IS A CHANNEL</p>
+        <p class="bb-true">OBEY</p>
+        <p class="bb-true sub">WATCH TV</p>
+        <p class="bb-true tiny">PUT ON THE GLASSES — PRESS S</p>
+      </div>
+      <p class="bb-caption color-only">They printed a lifestyle. The signal underneath is simpler: stay local, watch what you already own.</p>
+    </section>
+
+    <section id="glasses-ad" class="block">
+      <div class="ad-grid">
+        <figure class="ad-still">
+          <img src="assets/sunglasses.jpg" alt="Black 1980s sunglasses on a TV tray in front of a glowing CRT">
+        </figure>
+        <div class="ad-copy">
+          <p class="pkg-eyebrow">LATE NIGHT · PAID PROGRAMMING</p>
+          <h3>PUT ON THE GLASSES</h3>
+          <p>They Live hid the ads in the ads. Nightcrawler sold the footage back to the same city that produced it. LocalCable is the opposite trick: the guide is the product, and the product is your own shelves.</p>
+          <p>Press <kbd>S</kbd> or the GLS key on the remote. The color goes. The billboards tell the truth. This is your cable.</p>
+          <button type="button" class="btn gold" id="btn-glasses-ad">PUT THEM ON</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="infomercial" class="block">
+      <div class="info-still ken" style="background-image:url('assets/vhs.jpg')"></div>
+      <div class="info-panel">
+        <p class="cg">OPERATORS ARE NOT STANDING BY · THIS IS LOCAL</p>
+        <h2>INSTALL · TONIGHT</h2>
+        <p class="info-req">Python 3.11+ · uv or pip · ffmpeg / ffprobe · optional mpv</p>
+        <pre id="install-block" tabindex="0"><code>cd LocalCable
+uv sync --extra dev
+uv run localcable --media-root ~/Videos</code></pre>
+        <p class="info-then">Then open <span class="mono">http://127.0.0.1:8787/</span> — or bind <span class="mono">0.0.0.0</span> and watch from another computer on the LAN.</p>
+        <div class="hero-actions">
+          <button type="button" class="btn gold" id="btn-copy">COPY THE INCANTATION</button>
+          <a class="btn ghost" href="https://github.com/fluxoz/LocalCable#install">README</a>
+        </div>
+        <p class="info-fine">As seen after sign-off. Not available in stores. Rewind is a courtesy.</p>
+      </div>
+    </section>
+
+    <section id="living" class="block">
+      <div class="living-still" style="background-image:url('assets/living-room.jpg')"></div>
+      <blockquote>
+        <p>Everything runs offline on Linux except optional keyless artwork lookups. One process serves the guide, the streams, and the schedule. Headed mode opens a browser. Headless mode is the same page on a box in the closet.</p>
+      </blockquote>
+    </section>
+
+    <section id="signoff" class="block">
+      <div class="sign-still ken" style="background-image:url('assets/cyberwave.jpg')"></div>
+      <div class="sign-copy">
+        <p class="cg">CH 03 SIGNING OFF</p>
+        <img class="wordmark" src="assets/logo.svg" width="320" height="56" alt="">
+        <h2>WE’LL BE RIGHT BACK</h2>
+        <p class="sign-sub">BE KIND REWIND</p>
+        <div class="hero-actions">
+          <a class="btn gold" href="https://github.com/fluxoz/LocalCable">THE SOURCE</a>
+          <a class="btn ghost" href="#guide">BACK TO THE GUIDE</a>
+        </div>
+        <p class="sign-fine">LocalCable is MIT-licensed. Homage to overnight cable, VHS tracking, They Live, and the night desk. Not affiliated with any broadcaster, studio, or pair of sunglasses.</p>
+      </div>
+      <div class="bars end-bars" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+    </section>
+  </main>
+
+  <div id="bars-flash" hidden aria-hidden="true">
+    <div class="bars tall">
+      <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <p>PLEASE STAND BY</p>
+  </div>
+
+  <script src="js/broadcast.js"></script>
+</body>
+</html>

@@ -1,5 +1,7 @@
 # LocalCable
 
+**Broadcast:** [https://fluxoz.github.io/LocalCable/](https://fluxoz.github.io/LocalCable/)
+
 LocalCable turns a folder of videos into a living cable-TV guide.
 
 Point it at a media library. Classic **channel folders** still work; a Jellyfin parent with **Movies/** and **Shows/** is detected automatically and mixed onto genre cable channels with configurable names. Files become programs on a rolling timeline. Click a block, then **Watch** — playback **joins at the guide’s current time** (a show that started at 4:00 starts 20 minutes in at 4:20). **Start over** on the HUD plays from 0:00. Video plays in the page (H.264 MP4 is served directly; anything else is packaged as MPEG-DASH). Optional **mpv** on the server.
