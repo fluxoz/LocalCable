@@ -225,7 +225,6 @@
       video.addEventListener("play", syncHudButtons);
       video.addEventListener("pause", syncHudButtons);
       video.addEventListener("volumechange", syncHudButtons);
-      video.addEventListener("ended", onVideoEnded);
     }
     var stage = $("stage");
     if (stage) {
@@ -815,42 +814,6 @@
   function currentProgram() {
     if (!state.selectedId) return null;
     return state.programs[state.selectedId] || findProgram(state.selectedId);
-  }
-
-  function channelForProgram(program) {
-    if (!program) return null;
-    var channels = (state.schedule && state.schedule.channels) || [];
-    for (var i = 0; i < channels.length; i += 1) {
-      if (channels[i].number === program.channel_number) return channels[i];
-    }
-    return null;
-  }
-
-  function nextProgram(program) {
-    if (!program) return null;
-    var channel = channelForProgram(program);
-    if (!channel) return null;
-    var programs = channel.programs || [];
-    var end = parseTime(program.end_time);
-    var best = null;
-    var bestStart = Infinity;
-    for (var i = 0; i < programs.length; i += 1) {
-      if (programs[i].id === program.id) continue;
-      var start = parseTime(programs[i].start_time);
-      if (start >= end && start < bestStart) {
-        best = programs[i];
-        bestStart = start;
-      }
-    }
-    return best;
-  }
-
-  function onVideoEnded() {
-    if (!state.watching) return;
-    var next = nextProgram(currentProgram());
-    if (!next) return;
-    selectProgram(next.id);
-    playProgram(next.id, true);
   }
 
   function showArt(url) {
@@ -1490,7 +1453,6 @@
     scrollProgramIntoView: scrollProgramIntoView,
     enterWatching: enterWatching,
     leaveWatching: leaveWatching,
-    nextProgram: nextProgram,
     getState: function () {
       return state;
     },
