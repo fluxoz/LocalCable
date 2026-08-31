@@ -128,7 +128,10 @@ def pack_random(
 def _channel_rng(channel: Channel, window_start: datetime, rng: random.Random | None) -> random.Random:
     if rng is not None:
         return rng
-    seed_src = f"{channel.folder_path}|{window_start.isoformat()}"
+    # Include the channel number and name so genre channels (which all share the
+    # library root as folder_path) and padded clones each get a distinct shuffle
+    # instead of identical random programming.
+    seed_src = f"{channel.number}|{channel.name}|{channel.folder_path}|{window_start.isoformat()}"
     seed = int(hashlib.sha256(seed_src.encode("utf-8")).hexdigest()[:16], 16)
     return random.Random(seed)
 
