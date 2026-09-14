@@ -130,9 +130,13 @@ def test_index_and_logo(tmp_path: Path, media_root: Path, frozen_now: datetime):
         assert 'id="hud"' in html
         ui = client.get("/api/ui")
         assert ui.status_code == 200
-        assert ui.json()["banner"] == "TV Listings"
-        assert ui.json()["player"] == "mpv"
-        assert ui.json()["inpage_filter"] == "css"
+        body = ui.json()
+        assert body["banner"] == "TV Listings"
+        assert body["player"] == "mpv"
+        assert body["inpage_filter"] == "css"
+        assert body["theme"] == "default"
+        assert "header_bg" in body["colors"]
+        assert set(body["presets"]) >= {"default", "dark", "modern", "retro-green", "miami-vice", "dark-blue"}
         vendor = client.get("/static/vendor/dash.all.min.js")
         assert vendor.status_code == 200
         assert "dashjs" in vendor.text[:500]

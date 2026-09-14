@@ -171,6 +171,16 @@ def _media_from_cache(path: Path, record: dict[str, Any]) -> MediaFile | None:
     mse_copy = record.get("mse_copy")
     if mse_copy is not None:
         mse_copy = bool(mse_copy)
+    season = record.get("season")
+    episode = record.get("episode")
+    try:
+        season_i = int(season) if season is not None else None
+    except (TypeError, ValueError):
+        season_i = None
+    try:
+        episode_i = int(episode) if episode is not None else None
+    except (TypeError, ValueError):
+        episode_i = None
     return MediaFile(
         path=path.resolve(),
         title=str(title),
@@ -182,6 +192,10 @@ def _media_from_cache(path: Path, record: dict[str, Any]) -> MediaFile | None:
         video_codec=record.get("video_codec"),
         audio_codec=record.get("audio_codec"),
         mse_copy=mse_copy,
+        show_title=record.get("show_title"),
+        season=season_i,
+        episode=episode_i,
+        episode_title=record.get("episode_title"),
     )
 
 
@@ -203,6 +217,10 @@ def _cache_record(path: Path, media: MediaFile) -> dict[str, Any]:
         "video_codec": media.video_codec,
         "audio_codec": media.audio_codec,
         "mse_copy": media.mse_copy,
+        "show_title": media.show_title,
+        "season": media.season,
+        "episode": media.episode,
+        "episode_title": media.episode_title,
     }
 
 
@@ -289,6 +307,12 @@ def scan_media_root(
     if cache_dirty and cache_file is not None:
         _save_probe_cache(cache_file, cache)
 
+    from localcable.jellyfin import annotate_episode_fields
+
+    for channel in channels:
+        for item in channel.media:
+            annotate_episode_fields(item)
+
     channels.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
     return channels
 
@@ -317,11 +341,19 @@ def merge_channels(*groups: list[Channel]) -> list[Channel]:
 
 
 def pad_channels(channels: list[Channel], minimum: int) -> list[Channel]:
-    """Repeat existing channels until *minimum* rows fill the guide."""
+    """Repeat existing channels until *minimum* rows fill the guide.
+
+    Extra rows get unused invented network names instead of "Chuckle 2".
+    """
     if minimum <= 0 or not channels or len(channels) >= minimum:
         return channels
+    from localcable.lineup import extra_network_names
+
     used = {ch.number for ch in channels}
     copies = {ch.number: 1 for ch in channels}
+    used_names = {ch.name.strip().lower() for ch in channels}
+    spare = [name for name in extra_network_names() if name.strip().lower() not in used_names]
+    spare_i = 0
     out = list(channels)
     index = 0
     while len(out) < int(minimum):
@@ -332,7 +364,16 @@ def pad_channels(channels: list[Channel], minimum: int) -> list[Channel]:
             number += 1
         used.add(number)
         suffix = copies[src.number]
-        name = src.name if suffix <= 1 else f"{src.name} {suffix}"
+        name = None
+        while spare_i < len(spare):
+            candidate = spare[spare_i]
+            spare_i += 1
+            if candidate.strip().lower() not in used_names:
+                name = candidate
+                break
+        if not name:
+            name = src.name if suffix <= 1 else f"{src.name} {suffix}"
+        used_names.add(name.strip().lower())
         out.append(
             replace(
                 src,

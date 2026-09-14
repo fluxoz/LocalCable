@@ -686,10 +686,16 @@ def create_app(
 
     @app.get("/api/ui")
     def api_ui() -> JSONResponse:
+        theme = bundle.config.ui.resolved_theme()
         return JSONResponse(
             {
                 "banner": bundle.config.ui.banner,
-                "theme": bundle.config.ui.theme,
+                "theme": theme["theme"],
+                "theme_label": theme["label"],
+                "font": theme["font"],
+                "colors": theme["colors"],
+                "palette": theme["palette"],
+                "presets": theme["presets"],
                 "player": bundle.config.playback.player,
                 "start_from": bundle.config.playback.start_from,
                 "filter": bundle.config.playback.filter,
