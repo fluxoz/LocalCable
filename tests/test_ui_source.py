@@ -104,6 +104,13 @@ def test_js_is_browser_script_without_node_modules():
     assert "dashjs" in js
     assert "enterWatching" in js
     assert "handleWatchKey" in js
+    assert "rememberProgram" in js
+    assert "surfChannel" in js
+    play_fn = js.split("function playProgram", 1)[1].split("function tick", 1)[0]
+    assert "rememberProgram" in play_fn
+    start_fn = js.split("function startDash", 1)[1].split("function restartFromBeginning", 1)[0]
+    assert "streamSeq" in start_fn
+    assert "selectedId" in start_fn
     assert "restartFromBeginning" in js
     assert "liveOffset" in js
     assert "from_start" in js
