@@ -9,6 +9,7 @@ from localcable.config import (
     normalize_player,
     normalize_start_from,
 )
+from localcable.themes import PRESET_NAMES, normalize_theme
 
 
 def test_load_yaml_settings(tmp_path: Path):
@@ -135,6 +136,40 @@ def test_normalize_player_aliases():
     assert normalize_player("mpv") == "mpv"
     assert normalize_player("both") == "both"
     assert normalize_player(None) == "browser"
+
+
+def test_theme_and_color_overrides_from_yaml(tmp_path: Path):
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        "\n".join(
+            [
+                f"media_roots:",
+                f"  - {tmp_path / 'media'}",
+                "ui:",
+                "  theme: miami-vice",
+                "  colors:",
+                "    selected: '#ff00aa'",
+                "    header_bg: '#0bd3d3'",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(settings)
+    assert config.ui.theme == "miami-vice"
+    assert config.ui.colors["selected"] == "#ff00aa"
+    theme = config.ui.resolved_theme()
+    assert theme["theme"] == "miami-vice"
+    assert theme["colors"]["selected"] == "#ff00aa"
+    assert theme["colors"]["header_bg"] == "#0bd3d3"
+    assert theme["colors"]["page_bg"] == "#000000"
+    assert set(PRESET_NAMES) <= set(theme["presets"])
+
+
+def test_xfinity_theme_alias_is_default():
+    assert normalize_theme("xfinity") == "default"
+    assert normalize_theme("Retro Green") == "retro-green"
+    assert normalize_theme("directv") == "dark-blue"
 
 
 def test_banner_text_strips_and_falls_back():

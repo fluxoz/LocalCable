@@ -7,9 +7,12 @@ from datetime import datetime, timezone
 from localcable.config import LibraryRoot, LineupConfig
 from localcable.jellyfin import scan_libraries
 from localcable.lineup import (
+    EXTRA_NETWORK_NAMES,
     FALLBACK_SLOT,
+    LINEUP,
     configured_lineup,
     detect_library_kind,
+    extra_network_names,
     find_movie_dir,
     find_tv_dir,
     mix_playlist,
@@ -36,8 +39,22 @@ def test_pick_slot_maps_genres_to_invented_channels():
     assert pick_slot("Science-Fiction").name == "Starline"
     assert pick_slot("Kids / Animation").name == "Toonbox"
     assert pick_slot("Drama").name == "Prime"
+    assert pick_slot("Sitcom").name == "Sitcom Row"
+    assert pick_slot("Anime").name == "Toonami"
+    assert pick_slot("Fantasy").name == "Aether"
     assert pick_slot(None) is FALLBACK_SLOT
     assert pick_slot("").name == "Local 8"
+
+
+def test_default_lineup_has_many_unique_names():
+    names = [slot.name for slot in LINEUP] + [FALLBACK_SLOT.name]
+    assert len(names) == len(set(names))
+    assert len(LINEUP) >= 24
+    extras = extra_network_names()
+    assert len(extras) >= 40
+    taken = {name.lower() for name in names}
+    assert all(name.lower() not in taken for name in extras)
+    assert len(EXTRA_NETWORK_NAMES) >= 40
 
 
 def test_configured_lineup_renames_slots():
@@ -112,6 +129,10 @@ def test_auto_lineup_mixes_tv_and_movies_by_genre(tmp_path: Path):
     chuckle_titles = " ".join(m.title for m in by_name["Chuckle"].media)
     assert "Office" in chuckle_titles
     assert by_name["Chuckle"].playlist
+    office = next(m for m in by_name["Chuckle"].media if "Office" in (m.show_title or m.title))
+    assert office.show_title == "The Office"
+    assert office.season == 1
+    assert office.episode == 1
 
 
 def test_kind_auto_on_movies_only(tmp_path: Path):

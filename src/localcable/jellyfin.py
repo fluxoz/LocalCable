@@ -128,6 +128,60 @@ def parse_loose_filename(filename: str) -> dict[str, Any] | None:
     return None
 
 
+def _display_show_name(text: str) -> str:
+    """Series name without a trailing (Year). clean_title may have stripped ')'."""
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    repaired = raw + ")" if re.search(r"\((?:19|20|21)\d{2}$", raw) else raw
+    title, year = parse_movie_label(repaired)
+    if year and title:
+        return title
+    stripped = re.sub(r"\s*\(?((?:19|20|21)\d{2})\)?\s*$", "", raw).strip()
+    return stripped or raw
+
+
+def annotate_episode_fields(item: MediaFile) -> None:
+    """Fill show/season/episode from the filename or Jellyfin folder layout."""
+    if item.season is not None and item.episode is not None and item.show_title:
+        return
+    parsed = parse_loose_filename(item.path.name)
+    if parsed and parsed.get("kind") == "tv":
+        if not item.show_title:
+            raw_show = str(parsed.get("show") or "")
+            item.show_title = _display_show_name(raw_show) or None
+        if item.season is None:
+            item.season = int(parsed["season"])
+        if item.episode is None:
+            item.episode = int(parsed["episode"])
+        if not item.episode_title and parsed.get("episode_title"):
+            item.episode_title = str(parsed["episode_title"])
+        return
+    tag = parse_episode_tag(item.path.name)
+    if not tag:
+        return
+    season, episode = tag
+    if item.season is None:
+        item.season = season
+    if item.episode is None:
+        item.episode = episode
+    parent = item.path.parent
+    if SEASON_DIR.match(parent.name):
+        show_folder = parent.parent.name
+        title, _year = parse_movie_label(show_folder)
+        if not item.show_title:
+            item.show_title = title or show_folder
+    if not item.episode_title:
+        stem = item.path.stem
+        found = EPISODE.search(stem)
+        if found:
+            tail = stem[found.end() :].strip(" -._")
+            tail = QUALITY_TAGS.sub("", tail)
+            tail = re.sub(r"\s+", " ", tail).strip(" -._")
+            if tail:
+                item.episode_title = clean_title(tail)
+
+
 def jellyfin_tv_path(
     root: Path | str,
     show: str,
@@ -261,6 +315,7 @@ def scan_tv_root(
         )
         dirty = dirty or d
         for item in media:
+            annotate_episode_fields(item)
             tag = parse_episode_tag(item.path.name)
             if tag:
                 season, episode = tag
@@ -356,6 +411,9 @@ def _prefix_series_titles(channel: Channel) -> None:
     if not prefix:
         return
     for item in channel.media:
+        annotate_episode_fields(item)
+        if not item.show_title:
+            item.show_title = prefix
         if prefix.lower() not in item.title.lower():
             item.title = f"{prefix} · {item.title}"
 

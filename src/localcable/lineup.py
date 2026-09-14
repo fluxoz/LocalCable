@@ -64,21 +64,146 @@ class LineupSlot:
 
 # Invented cable brands. First match wins, so specific genres sit above Drama.
 LINEUP: tuple[LineupSlot, ...] = (
-    LineupSlot(17, "Nightfall", ("horror", "slasher")),
-    LineupSlot(13, "Thunderbolt", ("action", "adventure", "war", "martial arts")),
-    LineupSlot(15, "After Dark", ("crime", "thriller", "mystery", "suspense", "noir")),
-    LineupSlot(20, "Starline", ("science fiction", "sci fi", "scifi", "fantasy")),
-    LineupSlot(4, "Toonbox", ("animation", "anime", "kids", "children", "family", "cartoon")),
-    LineupSlot(6, "Chuckle", ("comedy", "sitcom")),
+    LineupSlot(18, "Slash", ("slasher",)),
+    LineupSlot(17, "Nightfall", ("horror",)),
+    LineupSlot(16, "Dojo", ("martial arts", "kung fu", "karate")),
+    LineupSlot(14, "Warpath", ("war", "military")),
+    LineupSlot(27, "Spyglass", ("spy", "espionage")),
+    LineupSlot(21, "Cape", ("superhero", "comic", "comics")),
+    LineupSlot(13, "Thunderbolt", ("action", "adventure")),
+    LineupSlot(12, "Noir Alley", ("noir",)),
+    LineupSlot(10, "Whodunit", ("mystery",)),
+    LineupSlot(9, "Cold Case", ("true crime",)),
+    LineupSlot(15, "After Dark", ("crime", "thriller", "suspense")),
+    LineupSlot(19, "Aether", ("fantasy",)),
+    LineupSlot(20, "Starline", ("science fiction", "sci fi", "scifi")),
+    LineupSlot(43, "Toonami", ("anime",)),
+    LineupSlot(4, "Toonbox", ("animation", "cartoon", "kids", "children")),
+    LineupSlot(41, "Family Hour", ("family",)),
+    LineupSlot(40, "Teenbeat", ("teen", "coming of age")),
+    LineupSlot(7, "Punchline", ("stand-up", "standup", "stand up")),
+    LineupSlot(5, "Sitcom Row", ("sitcom",)),
+    LineupSlot(6, "Chuckle", ("comedy",)),
     LineupSlot(11, "Heartstring", ("romance", "romantic")),
-    LineupSlot(8, "Worldscope", ("documentary", "history", "biography", "news", "reality", "nature")),
+    LineupSlot(39, "Soapbox", ("soap", "telenovela")),
+    LineupSlot(25, "Gavel", ("legal", "court", "law")),
+    LineupSlot(26, "Ward", ("medical", "hospital")),
+    LineupSlot(49, "Mayday", ("disaster",)),
+    LineupSlot(35, "Headline", ("news",)),
+    LineupSlot(36, "Real Life", ("reality",)),
+    LineupSlot(37, "Game Night", ("game show", "gameshow")),
+    LineupSlot(38, "Chatline", ("talk show", "talk-show", "talk")),
+    LineupSlot(34, "Wildside", ("nature", "wildlife")),
+    LineupSlot(33, "Voyage", ("travel",)),
+    LineupSlot(32, "Kitchen", ("food", "cooking")),
+    LineupSlot(8, "Worldscope", ("documentary", "history", "biography")),
     LineupSlot(28, "Gridiron", ("sport", "sports")),
     LineupSlot(31, "Jukebox", ("music", "musical")),
     LineupSlot(24, "Dustbowl", ("western",)),
+    LineupSlot(45, "Worldfilm", ("foreign", "international", "world cinema")),
+    LineupSlot(44, "Indiehouse", ("independent", "indie")),
+    LineupSlot(46, "Classics", ("classic", "silent")),
+    LineupSlot(48, "Tinsel", ("holiday", "christmas")),
     LineupSlot(22, "Prime", ("drama",)),
 )
 
 FALLBACK_SLOT = LineupSlot(2, "Local 8", ())
+
+# Spare invented networks used when padding the guide so clones are not
+# "Chuckle 2". Names already in LINEUP / FALLBACK_SLOT are skipped.
+EXTRA_NETWORK_NAMES: tuple[str, ...] = (
+    "Beacon 4",
+    "Bluebird",
+    "Boardwalk",
+    "Brightside",
+    "Broadcast 12",
+    "Canal",
+    "Carousel",
+    "Catalyst",
+    "Chronicle",
+    "Cinder",
+    "Circuit",
+    "Clearview",
+    "Cobalt",
+    "Comet",
+    "Copperline",
+    "Crossroads",
+    "Daybreak",
+    "Dispatch",
+    "Driftwood",
+    "Echo Park",
+    "Ember",
+    "Fairground",
+    "Firefly",
+    "Flagship",
+    "Floodlight",
+    "Foghorn",
+    "Foundry",
+    "Foxfire",
+    "Gateway",
+    "Goldleaf",
+    "Harbor",
+    "Highline",
+    "Ironwood",
+    "Keystone",
+    "Lakeside",
+    "Lantern",
+    "Lighthouse",
+    "Longwave",
+    "Lookout",
+    "Main Street",
+    "Marquee",
+    "Metro 9",
+    "Midway",
+    "Moonlight",
+    "Northstar",
+    "Overland",
+    "Palladium",
+    "Paper Moon",
+    "Parkway",
+    "Pavilion",
+    "Pilot Light",
+    "Pinwheel",
+    "Plaza",
+    "Redline",
+    "Ridgeway",
+    "Riverbend",
+    "Roadside",
+    "Sandbar",
+    "Satellite",
+    "Sidecar",
+    "Signal",
+    "Silverline",
+    "Skyline",
+    "Southland",
+    "Spotlight",
+    "Stadium",
+    "Station 3",
+    "Steelhead",
+    "Stovepipe",
+    "Sundown",
+    "Switchback",
+    "Tidepool",
+    "Timeslip",
+    "Trailhead",
+    "Turnpike",
+    "Twin Lakes",
+    "Uptown",
+    "Vista",
+    "Watchtower",
+    "Wavelength",
+    "Westend",
+    "Whistle",
+    "Windmill",
+    "Wiretap",
+    "Yardarm",
+)
+
+
+def extra_network_names() -> tuple[str, ...]:
+    taken = {slot.name.lower() for slot in LINEUP}
+    taken.add(FALLBACK_SLOT.name.lower())
+    return tuple(name for name in EXTRA_NETWORK_NAMES if name.lower() not in taken)
 
 
 def _norm_genre(text: str) -> str:
@@ -130,6 +255,14 @@ def configured_lineup(cfg: Any = None) -> tuple[tuple[LineupSlot, ...], LineupSl
     return tuple(slots), fallback
 
 
+def _keyword_in_blob(keyword: str, blob: str) -> bool:
+    """Whole-token match so 'anime' does not steal 'animation'."""
+    if not keyword or not blob:
+        return False
+    pattern = r"(?<![a-z0-9])" + re.escape(keyword) + r"(?![a-z0-9])"
+    return re.search(pattern, blob) is not None
+
+
 def pick_slot(
     genre: str | None,
     *,
@@ -144,7 +277,7 @@ def pick_slot(
         return miss
     for slot in table:
         for keyword in slot.keywords:
-            if keyword in blob:
+            if _keyword_in_blob(keyword, blob):
                 return slot
     return miss
 
