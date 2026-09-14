@@ -85,6 +85,7 @@
     hudPinned: false,
     infoOn: false,
     infoTimer: null,
+    streamSeq: 0,
     seeking: false,
     previewId: null,
     previewTimer: null,
@@ -1203,6 +1204,14 @@
     }
   }
 
+  function rememberProgram(program) {
+    if (!program) return;
+    state.selectedId = program.id;
+    if (program.channel_number != null) highlightChannel(program.channel_number);
+    fillHudCopy(program);
+    if (state.infoOn) fillInfoBanner(program);
+  }
+
   function surfChannel(delta) {
     var channels = (state.schedule && state.schedule.channels) || [];
     if (!channels.length) return;
@@ -1418,6 +1427,8 @@
   function startDash(program, fromStart, startSeconds) {
     var status = $("footer-status");
     if (typeof fetch !== "function") return;
+    state.streamSeq = (state.streamSeq || 0) + 1;
+    var seq = state.streamSeq;
     fetch("/api/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1429,6 +1440,8 @@
         });
       })
       .then(function (result) {
+        if (seq !== state.streamSeq) return;
+        if (state.selectedId && program.id !== state.selectedId) return;
         if (!result.body || !result.body.ok) {
           var err = (result.body && (result.body.error || result.body.detail)) || "stream failed";
           if (status) status.textContent = "Could not play (" + err + ")";
@@ -1455,6 +1468,7 @@
   function playProgram(id, fromStart) {
     var program = (state.programs && state.programs[id]) || findProgram(id);
     if (!program) return;
+    rememberProgram(program);
     var status = $("footer-status");
     if (usesBrowser()) {
       enterWatching(program);
@@ -1636,6 +1650,8 @@
     init: init,
     applyUi: applyUi,
     applyTheme: applyTheme,
+    rememberProgram: rememberProgram,
+    surfChannel: surfChannel,
     programLines: programLines,
     parseEpisodeTitle: parseEpisodeTitle,
     toggleInfoBanner: toggleInfoBanner,
