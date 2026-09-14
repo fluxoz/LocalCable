@@ -1,11 +1,53 @@
 (function (global) {
   "use strict";
 
-  var CHANNEL_COL = 132;
+  var CHANNEL_COL = 168;
+  var ROW_H = 56;
   var PX_PER_MIN = 14;
   var TICK_MINUTES = 30;
   var HUD_HIDE_MS = 4000;
+  var INFO_HIDE_MS = 8000;
   var SEEK_STEP = 10;
+  var COLOR_VARS = {
+    page_bg: "--page-bg",
+    header_bg: "--header-bg",
+    header_bg_2: "--header-bg-2",
+    header_bg_3: "--header-bg-3",
+    detail_bg: "--detail-bg",
+    detail_panel_from: "--detail-panel-from",
+    detail_panel_to: "--detail-panel-to",
+    timebar_bg: "--timebar-bg",
+    channel_bg: "--channel-bg",
+    channel_bg_alt: "--channel-bg-alt",
+    channel_selected: "--channel-selected",
+    grid_bg: "--grid-bg",
+    row_a: "--row-a",
+    row_b: "--row-b",
+    text: "--text",
+    muted: "--muted",
+    now: "--now",
+    selected: "--selected",
+    selected_text: "--selected-text",
+    footer_bg: "--footer-bg",
+    footer_text: "--footer-text",
+    footer_border: "--footer-border",
+    grid_line: "--grid-line",
+    clock: "--clock",
+    detail_channel: "--detail-channel",
+    detail_desc: "--detail-desc",
+    program_text: "--program-text",
+    tick_text: "--tick-text",
+    thumb_bg: "--thumb-bg",
+    thumb_border: "--thumb-border",
+    overlay_from: "--overlay-from",
+    overlay_to: "--overlay-to",
+    live_badge: "--live-badge",
+    time_nav_bg: "--time-nav-bg",
+    time_nav_hover: "--time-nav-hover",
+    scrollbar_thumb: "--scrollbar-thumb",
+    scrollbar_track: "--scrollbar-track",
+    info_banner_bg: "--info-banner-bg",
+  };
   var PALETTE = [
     "#2e8b6e",
     "#247a9e",
@@ -41,6 +83,8 @@
     programDuration: 0,
     hudTimer: null,
     hudPinned: false,
+    infoOn: false,
+    infoTimer: null,
     seeking: false,
     previewId: null,
     previewTimer: null,
@@ -85,6 +129,66 @@
     var start = new Date(startIso);
     var end = new Date(endIso);
     return formatClock(start) + " – " + formatClock(end);
+  }
+
+  function rowHeight() {
+    if (typeof document === "undefined") return ROW_H;
+    var raw = "";
+    try {
+      raw = getComputedStyle(document.documentElement).getPropertyValue("--row-h");
+    } catch (err) {
+      raw = "";
+    }
+    var n = parseFloat(raw);
+    return n > 0 ? n : ROW_H;
+  }
+
+  function channelColWidth() {
+    if (typeof document === "undefined") return CHANNEL_COL;
+    var raw = "";
+    try {
+      raw = getComputedStyle(document.documentElement).getPropertyValue("--channel-col");
+    } catch (err) {
+      raw = "";
+    }
+    var n = parseFloat(raw);
+    return n > 0 ? n : CHANNEL_COL;
+  }
+
+  function parseEpisodeTitle(title) {
+    var text = title || "";
+    var match = text.match(/[Ss](\d{1,2})[Ee](\d{1,2})/);
+    if (!match) {
+      return { show: "", season: null, episode: null, episode_title: "" };
+    }
+    var season = parseInt(match[1], 10);
+    var episode = parseInt(match[2], 10);
+    var before = text.slice(0, match.index).replace(/[·•\-|–—]+\s*$/, "").trim();
+    before = before.replace(/\s*\((?:19|20|21)\d{2}\)\s*$/, "").trim();
+    if (before.indexOf(" · ") !== -1) before = before.split(" · ")[0].trim();
+    var after = text.slice(match.index + match[0].length).replace(/^[\s:\-–—·•]+/, "").trim();
+    after = after.replace(/\s*\((?:19|20|21)\d{2}\)\s*$/, "").trim();
+    return { show: before, season: season, episode: episode, episode_title: after };
+  }
+
+  function programLines(program) {
+    if (!program) return { title: "", subtitle: "" };
+    var show = program.show_title || "";
+    var season = program.season;
+    var episode = program.episode;
+    var epTitle = program.episode_title || "";
+    if (!show || season == null || episode == null) {
+      var parsed = parseEpisodeTitle(program.title || "");
+      if (!show) show = parsed.show;
+      if (season == null) season = parsed.season;
+      if (episode == null) episode = parsed.episode;
+      if (!epTitle) epTitle = parsed.episode_title;
+    }
+    if (show && season != null && episode != null) {
+      var code = "S" + pad(season) + "E" + pad(episode);
+      return { title: show, subtitle: epTitle ? code + " " + epTitle : code };
+    }
+    return { title: program.title || "", subtitle: "" };
   }
 
   function formatDuration(seconds) {
@@ -173,7 +277,7 @@
       ["hud-mute", toggleMute],
       ["hud-ch-down", function () { surfChannel(-1); }],
       ["hud-ch-up", function () { surfChannel(1); }],
-      ["hud-info", toggleHudPin],
+      ["hud-info", toggleInfoBanner],
       ["hud-fs", toggleFullscreen],
     ];
     for (var i = 0; i < map.length; i += 1) {
@@ -229,7 +333,7 @@
     var stage = $("stage");
     if (stage) {
       stage.addEventListener("click", function (event) {
-        if (event.target && event.target.closest && event.target.closest("#hud-row, #hud-seek, #hud-volume")) {
+        if (event.target && event.target.closest && event.target.closest("#hud-row, #hud-seek, #hud-volume, #info-banner")) {
           return;
         }
         if (!state.watching) {
@@ -385,7 +489,7 @@
     }
     if (isInfoKey(key)) {
       event.preventDefault();
-      toggleHudPin();
+      toggleInfoBanner();
       return true;
     }
     if (key === "ArrowLeft") {
@@ -669,7 +773,18 @@
         block.style.left = left + "px";
         block.style.width = width + "px";
         block.style.background = colorFor(program.title);
-        block.textContent = program.title;
+        var lines = programLines(program);
+        var titleEl = document.createElement("span");
+        titleEl.className = "program-title";
+        titleEl.textContent = lines.title;
+        block.appendChild(titleEl);
+        if (lines.subtitle) {
+          var epEl = document.createElement("span");
+          epEl.className = "program-episode";
+          epEl.textContent = lines.subtitle;
+          block.appendChild(epEl);
+        }
+        block.setAttribute("title", lines.subtitle ? lines.title + " — " + lines.subtitle : lines.title);
         block.addEventListener("click", onProgramClick);
         block.addEventListener("dblclick", onProgramDblClick);
         row.appendChild(block);
@@ -677,7 +792,7 @@
       grid.appendChild(row);
     }
     grid.style.width = metrics.width + "px";
-    grid.style.minHeight = channels.length * 42 + "px";
+    grid.style.minHeight = channels.length * rowHeight() + "px";
   }
 
   function onProgramClick(event) {
@@ -698,7 +813,7 @@
     var x = xFor(nowMs(), metrics);
     if (line) {
       line.style.left = x + "px";
-      line.style.height = Math.max((schedule.channels || []).length, 1) * 42 + "px";
+      line.style.height = Math.max((schedule.channels || []).length, 1) * rowHeight() + "px";
     }
     var tick = $("now-tick");
     if (tick) tick.style.left = x + "px";
@@ -724,7 +839,7 @@
     var metrics = windowMetrics(state.schedule);
     var x = xFor(parseTime(program.start_time), metrics);
     var width = Math.max(((parseTime(program.end_time) - parseTime(program.start_time)) / 60000) * PX_PER_MIN, 2);
-    var viewW = scroller.clientWidth - CHANNEL_COL;
+    var viewW = scroller.clientWidth - channelColWidth();
     if (!(viewW > 80)) viewW = 640;
     var pad = 28;
     if (x < scroller.scrollLeft + pad) {
@@ -858,6 +973,7 @@
     var thumb = $("detail-thumb");
     if (thumb) thumb.classList.add("is-live");
     fillHudCopy(program);
+    if (state.infoOn) fillInfoBanner(program);
   }
 
   function fillHudCopy(program) {
@@ -923,6 +1039,7 @@
     if (typeof document !== "undefined" && document.body) {
       document.body.classList.remove("watching");
     }
+    hideInfoBanner();
     hideHud(true);
     var badge = $("video-overlay-live");
     if (badge && state.dashOn) badge.textContent = "Preview";
@@ -952,10 +1069,71 @@
     if (hud) hud.hidden = true;
   }
 
+  function hideInfoBanner() {
+    state.infoOn = false;
+    if (state.infoTimer && typeof clearTimeout === "function") {
+      clearTimeout(state.infoTimer);
+    }
+    state.infoTimer = null;
+    var banner = $("info-banner");
+    if (banner) banner.hidden = true;
+  }
+
+  function fillInfoBanner(program) {
+    if (!program) program = currentProgram();
+    var banner = $("info-banner");
+    if (!banner) return;
+    var lines = programLines(program || {});
+    var channel = $("info-banner-channel");
+    var title = $("info-banner-title");
+    var rating = $("info-banner-rating");
+    var time = $("info-banner-time");
+    var desc = $("info-banner-description");
+    var chName = (program && program.channel_name) || "";
+    var chNum = program && program.channel_number;
+    if (channel) {
+      channel.textContent = chNum != null && chNum !== "" ? chNum + "  " + chName : chName;
+    }
+    if (title) {
+      title.textContent = lines.subtitle ? lines.title : (program && program.title) || "";
+    }
+    if (rating) rating.textContent = (program && program.rating) || "";
+    if (time) {
+      var range = program && program.start_time ? formatRange(program.start_time, program.end_time) : "";
+      time.textContent = lines.subtitle ? range + "  ·  " + lines.subtitle : range;
+    }
+    if (desc) {
+      desc.textContent = (program && program.description) || "No description available.";
+    }
+  }
+
+  function showInfoBanner(program, persist) {
+    fillInfoBanner(program);
+    var banner = $("info-banner");
+    if (banner) banner.hidden = false;
+    state.infoOn = true;
+    if (state.infoTimer && typeof clearTimeout === "function") {
+      clearTimeout(state.infoTimer);
+    }
+    state.infoTimer = null;
+    if (!persist && typeof setTimeout === "function") {
+      state.infoTimer = setTimeout(hideInfoBanner, INFO_HIDE_MS);
+    }
+    showHud();
+  }
+
+  function toggleInfoBanner() {
+    if (!state.watching) return;
+    if (state.infoOn) {
+      hideInfoBanner();
+      showHud();
+      return;
+    }
+    showInfoBanner(currentProgram(), true);
+  }
+
   function toggleHudPin() {
-    state.hudPinned = !state.hudPinned;
-    if (state.hudPinned) showHud();
-    else showHud();
+    toggleInfoBanner();
   }
 
   function syncHudButtons() {
@@ -1367,8 +1545,26 @@
     grid.appendChild(empty);
   }
 
+  function applyTheme(ui) {
+    if (!ui || typeof document === "undefined") return;
+    var root = document.documentElement;
+    if (!root) return;
+    if (ui.theme) root.setAttribute("data-theme", String(ui.theme));
+    if (ui.font) root.style.setProperty("--font", String(ui.font));
+    var colors = ui.colors || {};
+    for (var key in COLOR_VARS) {
+      if (Object.prototype.hasOwnProperty.call(COLOR_VARS, key) && colors[key]) {
+        root.style.setProperty(COLOR_VARS[key], String(colors[key]));
+      }
+    }
+    if (Array.isArray(ui.palette) && ui.palette.length) {
+      PALETTE = ui.palette.slice();
+    }
+  }
+
   function applyUi(ui) {
     if (!ui) return;
+    applyTheme(ui);
     var label = $("header-label");
     var banner = ui.banner;
     if (label && banner != null) {
@@ -1439,6 +1635,10 @@
   global.LocalCableGuide = {
     init: init,
     applyUi: applyUi,
+    applyTheme: applyTheme,
+    programLines: programLines,
+    parseEpisodeTitle: parseEpisodeTitle,
+    toggleInfoBanner: toggleInfoBanner,
     render: render,
     selectProgram: selectProgram,
     playProgram: playProgram,

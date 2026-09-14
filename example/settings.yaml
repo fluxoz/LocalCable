@@ -59,12 +59,19 @@ lineup:
   #   - { number: 6, name: Comedy Central, genres: [comedy, sitcom] }
 
 ui:
-  theme: xfinity
+  # Preset EPG color themes: default, dark, modern, retro-green,
+  # miami-vice, dark-blue. "xfinity" is an alias for default.
+  theme: default
   banner: TV Listings             # top-right header text (try "guide")
   auto_open_browser: true         # headed mode
   # 127.0.0.1 = this machine only. 0.0.0.0 = other devices on the LAN can open the guide.
   bind_host: 127.0.0.1
   bind_port: 8787
+  # Override any EPG color from the preset. Keys match the CSS variables
+  # (underscores): header_bg, selected, grid_bg, now, text, muted, …
+  # colors:
+  #   selected: "#f5c518"
+  #   header_bg: "#123a78"
 
 # IR remote. If the remote already types like a keyboard (ir-keytable), leave
 # device empty — the guide HUD already binds CH+/−, digits, OK, Esc, Info.

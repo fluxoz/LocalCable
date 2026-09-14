@@ -49,7 +49,7 @@ Then start LocalCable again as usual. After an update:
 
 - **Quit any leftover mpv window** so it respawns with the new lua script, key bindings, and CRT filter.
 - **Hard-refresh the guide** in the browser (or close the tab and reopen http://127.0.0.1:8787/) so CSS/JS is not served from cache.
-- **New `settings.yaml` keys are optional** — missing fields keep their defaults. Compare with `example/settings.yaml` if you want the new options (`lineup` names, `playback.start_from`, `playback.player`, libraries, auto-organize).
+- **New `settings.yaml` keys are optional** — missing fields keep their defaults. Compare with `example/settings.yaml` if you want the new options (`ui.theme`, `ui.colors`, `lineup` names, `playback.start_from`, `playback.player`, libraries, auto-organize).
 
 IR grab support is extra: `uv sync --extra remote` (or `pip install -e ".[dev,remote]"`).
 
@@ -111,7 +111,7 @@ uv run localcable --media-root ~/Videos
     └── The Office (2005)/Season 01/…
 ```
 
-- **Genre lineup (default).** Movies and TV episodes are mixed onto cable channels. Defaults: Horror → **Nightfall**, action → **Thunderbolt**, comedy (including sitcoms) → **Chuckle**, sci-fi → **Starline**, kids/animation → **Toonbox**, drama → **Prime**, unlabeled → **Local 8**. Names are **configurable** in `settings.yaml` (see below). Empty genres are omitted. Genre comes from `.nfo` / embedded tags, then optional TVMaze (TV) and iTunes (movies) when `library.fetch_metadata` is on.
+- **Genre lineup (default).** Movies and TV episodes are mixed onto cable channels. Defaults include Horror → **Nightfall**, action → **Thunderbolt**, comedy → **Chuckle**, sitcoms → **Sitcom Row**, sci-fi → **Starline**, fantasy → **Aether**, kids/animation → **Toonbox**, anime → **Toonami**, drama → **Prime**, unlabeled → **Local 8**, plus extra invented networks (After Dark, Cape, Gridiron, Jukebox, …). Names are **configurable** in `settings.yaml` (see below). Empty genres are omitted. Genre comes from `.nfo` / embedded tags, then optional TVMaze (TV) and iTunes (movies) when `library.fetch_metadata` is on.
 - Episodes of a show stay in `SxxExx` order and are woven with movies on that channel.
 - `kind: tv` still means **one channel per series**. `kind: movies` is still one **Movies** channel. Use those when you do not want the mix.
 - `featurettes`, `extras`, `trailers`, and similar sidecar folders are skipped.
@@ -133,7 +133,7 @@ Opt-in. Parses loose filenames (`Show.Name.S01E02.720p.mkv`, `Movie.Name.1999.Bl
 ```yaml
 library:
   auto_channels: true        # genre mix + invented names (default)
-  min_channels: 24           # repeat channels so a small library still fills the grid
+  min_channels: 24           # pad the guide; extra rows get unique invented names
   auto_organize: true
   inbox: ~/Downloads
   fetch_metadata: true       # TVMaze / iTunes genres when tags/NFO are missing
@@ -184,6 +184,27 @@ Config lives **outside** the media tree, default `~/.config/localcable/`:
 Drop a PNG, SVG, or JPEG named `provider_logo.png` (or the filename in `logo:`) into that directory. If the file is missing, LocalCable serves a built-in LocalCable wordmark.
 
 The top-right header label defaults to **TV Listings**. Set `ui.banner` in `settings.yaml` to any string (for example `guide`, like DirecTV).
+
+### EPG color themes
+
+`ui.theme` picks a preset. Every EPG color is also overridable under `ui.colors`.
+
+| Theme | Look |
+| --- | --- |
+| `default` | Current Xfinity-style blues (alias: `xfinity`) |
+| `dark` | Near-black guide |
+| `modern` | Flat slate with a blue accent |
+| `retro-green` | Phosphor terminal green |
+| `miami-vice` | Cyan / pink / black ([palette](https://www.color-hex.com/color-palette/45581)) |
+| `dark-blue` | Classic DirecTV navy + gold |
+
+```yaml
+ui:
+  theme: miami-vice
+  colors:
+    selected: "#f890e7"
+    header_bg: "#0bd3d3"
+```
 
 See `example/settings.yaml` for a full template.
 

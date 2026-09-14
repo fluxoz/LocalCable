@@ -30,6 +30,8 @@ def test_html_has_guide_landmarks():
         'id="hud"',
         'id="hud-restart"',
         'id="hud-crt"',
+        'id="hud-info"',
+        'id="info-banner"',
         'id="stage"',
         "TV Listings",
         "/static/vendor/dash.all.min.js",
@@ -57,6 +59,10 @@ def test_css_has_layout_hooks():
         "#stage",
         "#hud",
         "#hud-crt-label",
+        "#info-banner",
+        ".program-title",
+        ".program-episode",
+        ".ch-num",
         ".crt-vhs",
         "#player",
         "body.watching",
@@ -102,6 +108,11 @@ def test_js_is_browser_script_without_node_modules():
     assert "liveOffset" in js
     assert "from_start" in js
     assert "hud-crt" in js
+    assert "hud-info" in js
+    assert "toggleInfoBanner" in js
+    assert "programLines" in js
+    assert "applyTheme" in js
+    assert "info-banner" in js
     assert "activeFilter" in js
     assert "/api/preview/" in js
     assert "applyCrtClass" in js
@@ -116,6 +127,7 @@ def test_stage_click_ignores_hud_controls_before_reentering_watching():
     re-enter the large player right after returnToGuide() shrank it."""
     js = (STATIC / "guide.js").read_text(encoding="utf-8")
     handler = js.split('stage.addEventListener("click"', 1)[1].split("});", 1)[0]
+    assert "#info-banner" in handler
     guard = handler.find('closest("#hud-row')
     reenter = handler.find("enterWatching(currentProgram())")
     assert guard != -1, "stage click handler lost its HUD-control guard"
