@@ -62,6 +62,23 @@ SCHEDULE = {
                     "channel_number": 101,
                     "channel_name": "CNN",
                 },
+                {
+                    "id": "p-office",
+                    "title": "The Office (2005) - S01E01 - Pilot",
+                    "show_title": "The Office",
+                    "season": 1,
+                    "episode": 1,
+                    "episode_title": "Pilot",
+                    "description": "A paper company in Scranton.",
+                    "rating": "TV-14",
+                    "genre": "Comedy",
+                    "duration_seconds": 1800,
+                    "file_path": "/media/101_CNN/office.mkv",
+                    "start_time": "2026-08-23T15:20:00+00:00",
+                    "end_time": "2026-08-23T15:50:00+00:00",
+                    "channel_number": 101,
+                    "channel_name": "CNN",
+                },
             ],
         }
     ],
@@ -114,6 +131,17 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
   var title = document.getElementById("detail-title");
   var time = document.getElementById("detail-time");
   var scroller = document.getElementById("grid-scroll");
+  var office = document.querySelector('[data-program-id="p-office"]');
+  var chCell = document.querySelector(".channel-cell");
+  var lines = window.LocalCableGuide.programLines
+    ? window.LocalCableGuide.programLines({{
+        title: "The Office (2005) - S01E01 - Pilot",
+        show_title: "The Office",
+        season: 1,
+        episode: 1,
+        episode_title: "Pilot"
+      }})
+    : {{}};
   var report = {{
     installed: !!(window.LocalCableGuide && window.LocalCableGuide.selectProgram && window.LocalCableGuide.scrollProgramIntoView),
     errors: errors,
@@ -125,6 +153,14 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
     channels: document.querySelectorAll(".channel-cell").length,
     hasHud: !!document.getElementById("hud"),
     hasPlayer: !!document.getElementById("player"),
+    hasInfo: !!document.getElementById("info-banner"),
+    hasToggleInfo: !!(window.LocalCableGuide && window.LocalCableGuide.toggleInfoBanner),
+    channelNum: chCell && chCell.querySelector(".ch-num") ? chCell.querySelector(".ch-num").textContent : "",
+    channelName: chCell && chCell.querySelector(".ch-name") ? chCell.querySelector(".ch-name").textContent : "",
+    officeTitle: office && office.querySelector(".program-title") ? office.querySelector(".program-title").textContent : "",
+    officeEpisode: office && office.querySelector(".program-episode") ? office.querySelector(".program-episode").textContent : "",
+    parsedTitle: lines.title || "",
+    parsedSubtitle: lines.subtitle || "",
     scrollLeft: scroller ? scroller.scrollLeft : -1
   }};
   var el = document.createElement("pre");
@@ -172,4 +208,13 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
     assert report["selected"] == 1
     assert report["hasHud"] is True
     assert report["hasPlayer"] is True
+    assert report["hasInfo"] is True
+    assert report["hasToggleInfo"] is True
+    assert report["channelNum"] == "101"
+    assert report["channelName"] == "CNN"
+    assert report["officeTitle"] == "The Office"
+    assert "S01E01" in report["officeEpisode"]
+    assert "Pilot" in report["officeEpisode"]
+    assert report["parsedTitle"] == "The Office"
+    assert "S01E01" in report["parsedSubtitle"]
     assert report["scrollLeft"] > 200

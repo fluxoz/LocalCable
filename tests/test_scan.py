@@ -85,7 +85,9 @@ def test_pad_channels_repeats_until_minimum():
     names = [ch.name for ch in padded]
     assert "Thunderbolt" in names
     assert "Chuckle" in names
-    assert any(n.startswith("Thunderbolt") and n != "Thunderbolt" for n in names)
+    assert len(set(names)) == 5
+    assert "Thunderbolt 2" not in names
+    assert "Chuckle 2" not in names
     assert len({ch.number for ch in padded}) == 5
     assert pad_channels(src, 0) == src
     assert pad_channels([], 24) == []

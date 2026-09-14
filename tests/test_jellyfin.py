@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from localcable.jellyfin import (
+    annotate_episode_fields,
     jellyfin_movie_path,
     jellyfin_tv_path,
     parse_episode_tag,
@@ -47,6 +48,19 @@ def test_parse_episode_and_loose_names():
     assert movie["year"] == "1999"
 
 
+def test_annotate_episode_fields_from_filename():
+    item = MediaFile(
+        path=Path("/Shows/The Office (2005)/Season 01/The Office (2005) - S01E02 - Diversity Day.mkv"),
+        title="whatever",
+        duration_seconds=1,
+    )
+    annotate_episode_fields(item)
+    assert item.show_title == "The Office"
+    assert item.season == 1
+    assert item.episode == 2
+    assert item.episode_title == "Diversity Day"
+
+
 def test_jellyfin_paths():
     tv = jellyfin_tv_path("/media/Shows", "The Office", "2005", 1, 2, ".mkv", "The Dundies")
     assert tv.parent.name == "Season 01"
@@ -71,6 +85,10 @@ def test_scan_tv_root_series_are_channels(tmp_path: Path):
     office = by_name["The Office (2005)"]
     assert len(office.media) == 2
     assert "S01E01" in office.media[0].title
+    assert office.media[0].show_title == "The Office"
+    assert office.media[0].season == 1
+    assert office.media[0].episode == 1
+    assert office.media[0].episode_title == "Pilot"
     extras = [m for m in office.media if "behind" in m.path.name]
     assert extras == []
 

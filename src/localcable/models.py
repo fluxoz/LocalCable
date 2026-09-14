@@ -29,6 +29,10 @@ class MediaFile:
     video_codec: str | None = None
     audio_codec: str | None = None
     mse_copy: bool | None = None
+    show_title: str | None = None
+    season: int | None = None
+    episode: int | None = None
+    episode_title: str | None = None
 
 
 @dataclass
@@ -55,6 +59,10 @@ class ScheduledProgram:
     channel_number: int
     channel_name: str
     mse_copy: bool | None = None
+    show_title: str | None = None
+    season: int | None = None
+    episode: int | None = None
+    episode_title: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -70,6 +78,10 @@ class ScheduledProgram:
             "channel_number": self.channel_number,
             "channel_name": self.channel_name,
             "art": f"/art/{self.id}",
+            "show_title": self.show_title,
+            "season": self.season,
+            "episode": self.episode,
+            "episode_title": self.episode_title,
         }
 
 

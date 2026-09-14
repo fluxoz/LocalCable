@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from localcable.crt import normalize_filter
+from localcable.themes import COLOR_KEYS, normalize_theme, resolve_theme
 
 DEFAULT_CONFIG_DIR = Path.home() / ".config" / "localcable"
 DEFAULT_BIND_HOST = "127.0.0.1"
@@ -78,11 +79,22 @@ class LibraryConfig:
 
 @dataclass
 class UiConfig:
-    theme: str = "xfinity"
+    theme: str = "default"
+    colors: dict[str, str] = field(default_factory=dict)
+    palette: list[str] = field(default_factory=list)
+    font: str | None = None
     auto_open_browser: bool = True
     bind_host: str = DEFAULT_BIND_HOST
     bind_port: int = DEFAULT_BIND_PORT
     banner: str = DEFAULT_BANNER
+
+    def resolved_theme(self) -> dict[str, Any]:
+        extra: dict[str, Any] = dict(self.colors)
+        if self.palette:
+            extra["palette"] = list(self.palette)
+        if self.font:
+            extra["font"] = self.font
+        return resolve_theme(self.theme, extra)
 
 
 @dataclass
@@ -217,6 +229,26 @@ def normalize_kind(value: Any, default: str = "channels") -> str:
     if text in {"auto", "lineup", "cable"}:
         return "auto"
     return default
+
+
+def _parse_colors(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, raw in value.items():
+        name = str(key).strip().lower().replace("-", "_")
+        if name not in COLOR_KEYS or raw is None:
+            continue
+        text = str(raw).strip()
+        if text:
+            out[name] = text
+    return out
+
+
+def _parse_palette(value: Any) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _parse_libraries(value: Any) -> list[LibraryRoot]:
@@ -355,8 +387,18 @@ def load_config(
         filter_preset=str(preset) if preset else None,
         inpage_filter=normalize_inpage_filter(play_raw.get("inpage_filter", "css")),
     )
+    color_raw = ui_raw.get("colors") or ui_raw.get("epg_colors") or {}
+    font_raw = ui_raw.get("font")
+    if isinstance(color_raw, dict) and color_raw.get("font") and not font_raw:
+        font_raw = color_raw.get("font")
+    palette_raw = ui_raw.get("palette")
+    if isinstance(color_raw, dict) and color_raw.get("palette") and not palette_raw:
+        palette_raw = color_raw.get("palette")
     ui = UiConfig(
-        theme=str(ui_raw.get("theme", "xfinity")),
+        theme=normalize_theme(ui_raw.get("theme", "default")),
+        colors=_parse_colors(color_raw),
+        palette=_parse_palette(palette_raw),
+        font=str(font_raw).strip() if font_raw else None,
         auto_open_browser=bool(ui_raw.get("auto_open_browser", True)),
         bind_host=str(ui_raw.get("bind_host", DEFAULT_BIND_HOST)),
         bind_port=int(ui_raw.get("bind_port", DEFAULT_BIND_PORT)),
