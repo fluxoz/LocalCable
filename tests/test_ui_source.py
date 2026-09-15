@@ -123,6 +123,13 @@ def test_js_is_browser_script_without_node_modules():
     assert "activeFilter" in js
     assert "/api/preview/" in js
     assert "applyCrtClass" in js
+    assert "nextProgram" in js
+    assert "onVideoEnded" in js
+    assert 'addEventListener("ended"' in js
+    ended_fn = js.split("function onVideoEnded", 1)[1].split("function showArt", 1)[0]
+    assert "state.watching" in ended_fn
+    assert "playProgram" in ended_fn
+    assert "next.id, true" in ended_fn
     on_key = js.split("function onKey", 1)[1].split("function currentChannelIndex", 1)[0]
     assert "isGuideKey" in on_key
     assert "playProgram" in on_key
