@@ -86,6 +86,7 @@
     infoOn: false,
     infoTimer: null,
     streamSeq: 0,
+    ignoreEnded: false,
     seeking: false,
     previewId: null,
     previewTimer: null,
@@ -330,6 +331,10 @@
       video.addEventListener("play", syncHudButtons);
       video.addEventListener("pause", syncHudButtons);
       video.addEventListener("volumechange", syncHudButtons);
+      video.addEventListener("playing", function () {
+        state.ignoreEnded = false;
+      });
+      video.addEventListener("ended", onVideoEnded);
     }
     var stage = $("stage");
     if (stage) {
@@ -932,6 +937,44 @@
     return state.programs[state.selectedId] || findProgram(state.selectedId);
   }
 
+  function channelForProgram(program) {
+    if (!program || !state.schedule) return null;
+    var channels = state.schedule.channels || [];
+    var number = program.channel_number;
+    for (var i = 0; i < channels.length; i += 1) {
+      if (channels[i].number === number) return channels[i];
+    }
+    return null;
+  }
+
+  function nextProgram(program) {
+    if (!program) return null;
+    var channel = channelForProgram(program);
+    if (!channel) return null;
+    var programs = channel.programs || [];
+    var end = parseTime(program.end_time);
+    var best = null;
+    var bestStart = Infinity;
+    for (var i = 0; i < programs.length; i += 1) {
+      if (programs[i].id === program.id) continue;
+      var start = parseTime(programs[i].start_time);
+      if (start >= end && start < bestStart) {
+        best = programs[i];
+        bestStart = start;
+      }
+    }
+    return best;
+  }
+
+  function onVideoEnded() {
+    if (!state.watching) return;
+    if (state.ignoreEnded) return;
+    var next = nextProgram(currentProgram());
+    if (!next) return;
+    state.ignoreEnded = true;
+    playProgram(next.id, true);
+  }
+
   function showArt(url) {
     var img = $("detail-art");
     var ph = document.querySelector(".thumb-placeholder");
@@ -1326,6 +1369,11 @@
       if (!state.dashPlayer) {
         state.dashPlayer = dashjs.MediaPlayer().create();
         state.dashPlayer.initialize(video, manifest, true);
+        try {
+          if (dashjs.MediaPlayer.events && dashjs.MediaPlayer.events.PLAYBACK_ENDED) {
+            state.dashPlayer.on(dashjs.MediaPlayer.events.PLAYBACK_ENDED, onVideoEnded);
+          }
+        } catch (err) {}
       } else if (typeof state.dashPlayer.attachSource === "function") {
         state.dashPlayer.attachSource(manifest);
       } else {
@@ -1468,6 +1516,7 @@
   function playProgram(id, fromStart) {
     var program = (state.programs && state.programs[id]) || findProgram(id);
     if (!program) return;
+    state.ignoreEnded = true;
     rememberProgram(program);
     var status = $("footer-status");
     if (usesBrowser()) {
@@ -1669,6 +1718,8 @@
     scrollProgramIntoView: scrollProgramIntoView,
     enterWatching: enterWatching,
     leaveWatching: leaveWatching,
+    nextProgram: nextProgram,
+    onVideoEnded: onVideoEnded,
     getState: function () {
       return state;
     },

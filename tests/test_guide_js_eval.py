@@ -218,3 +218,99 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
     assert report["parsedTitle"] == "The Office"
     assert "S01E01" in report["parsedSubtitle"]
     assert report["scrollLeft"] > 200
+
+
+def _eval_guide(tmp_path: Path, boot: str) -> dict:
+    js = (STATIC / "guide.js").read_text(encoding="utf-8")
+    html_src = (STATIC / "index.html").read_text(encoding="utf-8")
+    html_src = re.sub(r'<script src="/static/guide.js"></script>', "", html_src)
+    html_src = html_src.replace(
+        '<link rel="stylesheet" href="/static/guide.css">',
+        "<style>" + (STATIC / "guide.css").read_text(encoding="utf-8") + "</style>",
+    )
+    html_src = html_src.replace("</body>", boot.replace("__JS__", js) + "</body>")
+    page = tmp_path / "guide.html"
+    page.write_text(html_src, encoding="utf-8")
+    profile = tmp_path / "chrome-profile"
+    profile.mkdir()
+    proc = subprocess.run(
+        [
+            _chromium(),
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            f"--user-data-dir={profile}",
+            "--window-size=1400,900",
+            "--virtual-time-budget=3000",
+            "--dump-dom",
+            str(page),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr[-1000:]
+    match = re.search(r'<pre id="eval-report">([^<]+)</pre>', proc.stdout)
+    assert match, proc.stdout[-2000:]
+    return json.loads(match.group(1).replace("&quot;", '"'))
+
+
+@pytest.mark.skipif(_chromium() is None, reason="chromium not installed")
+def test_guide_js_auto_advances_on_media_end(tmp_path: Path):
+    payload = json.dumps(SCHEDULE)
+    boot = f"""
+<script>
+window.LocalCableSkipAutoLoad = true;
+window.__pageErrors = [];
+window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
+</script>
+<script>
+__JS__
+</script>
+<script>
+(function () {{
+  var errors = window.__pageErrors.slice();
+  var guide = window.LocalCableGuide;
+  var nextTitle = "";
+  var advancedTitle = "";
+  var previewTitle = "";
+  try {{
+    guide.render({payload});
+    var late = guide.getState().programs["p-late"];
+    var computed = guide.nextProgram(late);
+    nextTitle = computed ? computed.title : "";
+    guide.selectProgram("p-news");
+    guide.onVideoEnded();
+    previewTitle = (guide.getState().programs[guide.getState().selectedId] || {{}}).title || "";
+    guide.selectProgram("p-late");
+    guide.enterWatching(late);
+    guide.onVideoEnded();
+    var advanced = guide.getState().selectedId;
+    var prog = guide.getState().programs[advanced];
+    advancedTitle = prog ? prog.title : "";
+  }} catch (err) {{
+    errors.push(String(err));
+  }}
+  var el = document.createElement("pre");
+  el.id = "eval-report";
+  el.textContent = JSON.stringify({{
+    errors: errors,
+    nextTitle: nextTitle,
+    advancedTitle: advancedTitle,
+    previewTitle: previewTitle,
+    hasNextProgram: !!(guide && guide.nextProgram),
+    hasOnEnded: !!(guide && guide.onVideoEnded)
+  }});
+  document.body.appendChild(el);
+}})();
+</script>
+"""
+    report = _eval_guide(tmp_path, boot)
+    assert report["errors"] == []
+    assert report["hasNextProgram"] is True
+    assert report["hasOnEnded"] is True
+    assert report["nextTitle"] == "The Office (2005) - S01E01 - Pilot"
+    assert report["advancedTitle"] == "The Office (2005) - S01E01 - Pilot"
+    assert report["previewTitle"] == "Evening News"
