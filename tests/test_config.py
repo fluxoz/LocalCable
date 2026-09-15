@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from localcable.config import (
+    DEFAULT_MPV_ARGS,
+    PlaybackConfig,
     banner_text,
     load_config,
     normalize_inpage_filter,
@@ -48,6 +50,8 @@ def test_load_yaml_settings(tmp_path: Path):
     assert config.remote.device is None
     assert config.remote.digit_timeout_ms == 1400
     assert config.artwork.fetch is True
+    assert "--profile=fast" in config.playback.mpv_args
+    assert config.playback.mpv_args == list(DEFAULT_MPV_ARGS)
 
 
 def test_libraries_and_browser_player_from_yaml(tmp_path: Path):
@@ -105,6 +109,13 @@ def test_lineup_names_from_yaml(tmp_path: Path):
     assert config.playback.start_from == "live"
 
 
+def test_default_mpv_args_include_fast_profile():
+    assert "--profile=fast" in DEFAULT_MPV_ARGS
+    assert "--fullscreen" in DEFAULT_MPV_ARGS
+    assert "--hwdec=auto" in DEFAULT_MPV_ARGS
+    assert PlaybackConfig().mpv_args == list(DEFAULT_MPV_ARGS)
+
+
 def test_example_settings_keep_crt_under_playback():
     settings = Path(__file__).resolve().parents[1] / "example" / "settings.yaml"
     text = settings.read_text(encoding="utf-8")
@@ -116,6 +127,7 @@ def test_example_settings_keep_crt_under_playback():
     config = load_config(settings)
     assert config.playback.inpage_filter == "css"
     assert config.playback.filter == "off"
+    assert "--profile=fast" in config.playback.mpv_args
 
 
 def test_normalize_inpage_filter():
