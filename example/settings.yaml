@@ -38,7 +38,7 @@ playback:
   # mpv     = local mpv window on the server
   # both    = in-page + mpv (two audio paths — usually not what you want)
   player: browser
-  mpv_args: ["--fullscreen", "--hwdec=auto"]
+  mpv_args: ["--fullscreen", "--hwdec=auto", "--profile=fast"]
   start_from: live                # live = join at the guide's "now"; beginning = always 0:00
   # CRT / VHS look (https://ntsc.rs/). off | ntsc | vhs
   # mpv uses the vendored ntscrs plugin. The in-page HUD CRT checkbox is CSS by

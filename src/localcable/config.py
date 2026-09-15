@@ -19,6 +19,7 @@ DEFAULT_LOGO_FILENAME = "provider_logo.png"
 DEFAULT_BANNER = "TV Listings"
 DEFAULT_PLAYER = "browser"
 DEFAULT_START_FROM = "live"
+DEFAULT_MPV_ARGS = ["--fullscreen", "--hwdec=auto", "--profile=fast"]
 VALID_LIBRARY_KINDS = ("channels", "tv", "movies", "jellyfin", "auto")
 VALID_PLAYERS = ("browser", "mpv", "both")
 
@@ -42,7 +43,7 @@ class ScheduleConfig:
 @dataclass
 class PlaybackConfig:
     player: str = DEFAULT_PLAYER
-    mpv_args: list[str] = field(default_factory=lambda: ["--fullscreen", "--hwdec=auto"])
+    mpv_args: list[str] = field(default_factory=lambda: list(DEFAULT_MPV_ARGS))
     start_from: str = DEFAULT_START_FROM
     ipc_socket: str | None = None
     filter: str = "off"
@@ -374,7 +375,7 @@ def load_config(
         window_hours_after=float(sched_raw.get("window_hours_after", 18)),
         default_mode=_mode(sched_raw.get("default_mode"), "sequential"),
     )
-    mpv_args = play_raw.get("mpv_args", ["--fullscreen", "--hwdec=auto"])
+    mpv_args = play_raw.get("mpv_args", list(DEFAULT_MPV_ARGS))
     if isinstance(mpv_args, str):
         mpv_args = [mpv_args]
     preset = play_raw.get("filter_preset")
