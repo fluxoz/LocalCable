@@ -88,6 +88,10 @@
     streamSeq: 0,
     ignoreEnded: false,
     seeking: false,
+    settingsOpen: false,
+    transcodeTimer: null,
+    transcodeRunning: false,
+    transcodeWasRunning: false,
     previewId: null,
     previewTimer: null,
   };
@@ -262,6 +266,7 @@
       });
     }
     bindHud();
+    bindSettings();
     if (typeof document !== "undefined") {
       document.addEventListener("keydown", onKey, true);
       if (typeof window !== "undefined") {
@@ -269,6 +274,201 @@
         window.addEventListener("mousemove", onWatchPointer);
       }
     }
+  }
+
+  function bindSettings() {
+    var open = $("settings-button");
+    var close = $("settings-close");
+    var overlay = $("settings-overlay");
+    var start = $("transcode-start");
+    var cancel = $("transcode-cancel");
+    var footer = $("transcode-footer");
+    if (open) open.addEventListener("click", openSettings);
+    if (close) close.addEventListener("click", closeSettings);
+    if (overlay) {
+      overlay.addEventListener("click", function (event) {
+        if (event.target === overlay) closeSettings();
+      });
+    }
+    if (start) start.addEventListener("click", startTranscode);
+    if (cancel) cancel.addEventListener("click", cancelTranscode);
+    if (footer) footer.addEventListener("click", openSettings);
+  }
+
+  function openSettings() {
+    var overlay = $("settings-overlay");
+    if (overlay) overlay.hidden = false;
+    state.settingsOpen = true;
+    loadTranscodeStatus(true);
+    pollTranscode(true);
+  }
+
+  function closeSettings() {
+    var overlay = $("settings-overlay");
+    if (overlay) overlay.hidden = true;
+    state.settingsOpen = false;
+    if (!(state.transcodeRunning)) pollTranscode(false);
+  }
+
+  function selectedRungs() {
+    var boxes = document.querySelectorAll('#transcode-rungs input[name="rung"]');
+    var out = [];
+    for (var i = 0; i < boxes.length; i += 1) {
+      if (boxes[i].checked) out.push(boxes[i].value);
+    }
+    return out.length ? out : ["native"];
+  }
+
+  function applyTranscodeDefaults(defaults) {
+    if (!defaults) return;
+    var rungs = defaults.rungs || [];
+    var boxes = document.querySelectorAll('#transcode-rungs input[name="rung"]');
+    if (rungs.length) {
+      for (var i = 0; i < boxes.length; i += 1) {
+        boxes[i].checked = rungs.indexOf(boxes[i].value) !== -1;
+      }
+    }
+    var hw = $("transcode-hw");
+    if (hw && defaults.hw) hw.value = defaults.hw;
+    var keep = $("transcode-keep");
+    if (keep && defaults.keep_original != null) keep.checked = !!defaults.keep_original;
+  }
+
+  function setBar(id, pct) {
+    var el = $(id);
+    if (!el) return;
+    var n = Math.max(0, Math.min(100, Number(pct) || 0));
+    el.style.width = n + "%";
+  }
+
+  function renderTranscodeFiles(files) {
+    var root = $("transcode-files");
+    if (!root) return;
+    root.textContent = "";
+    var rows = files || [];
+    for (var i = 0; i < rows.length; i += 1) {
+      var row = rows[i];
+      var div = document.createElement("div");
+      div.className = "transcode-file is-" + (row.status || "pending");
+      var name = document.createElement("span");
+      name.textContent = (row.src || "") + (row.label ? " · " + row.label : "");
+      var status = document.createElement("span");
+      status.textContent = row.status || "";
+      var bar = document.createElement("div");
+      bar.className = "transcode-file-bar";
+      var fill = document.createElement("span");
+      fill.style.width = (row.percent || 0) + "%";
+      bar.appendChild(fill);
+      div.appendChild(name);
+      div.appendChild(status);
+      div.appendChild(bar);
+      root.appendChild(div);
+    }
+  }
+
+  function applyTranscodeStatus(body) {
+    if (!body) return;
+    if (body.defaults) applyTranscodeDefaults(body.defaults);
+    if (state.transcodeWasRunning && !body.running && body.phase === "done") {
+      loadSchedule();
+    }
+    state.transcodeRunning = !!body.running;
+    state.transcodeWasRunning = !!body.running;
+    var msg = $("transcode-message");
+    if (msg) msg.textContent = body.message || body.error || "";
+    var libLabel = $("transcode-library-label");
+    if (libLabel) {
+      libLabel.textContent = (body.library_percent || 0) + "%  " + (body.library_done || 0) + "/" + (body.library_total || 0);
+    }
+    setBar("transcode-library-bar", body.library_percent);
+    var fileName = $("transcode-file-name");
+    if (fileName) {
+      var src = body.current_src ? String(body.current_src).split(/[/\\]/).pop() : "Current file";
+      fileName.textContent = src;
+    }
+    var fileLabel = $("transcode-file-label");
+    if (fileLabel) fileLabel.textContent = (body.file_percent || 0) + "%";
+    setBar("transcode-file-bar", body.file_percent);
+    renderTranscodeFiles(body.files);
+    var start = $("transcode-start");
+    var cancel = $("transcode-cancel");
+    if (start) start.disabled = !!body.running;
+    if (cancel) cancel.hidden = !body.running;
+    var footer = $("transcode-footer");
+    if (footer) {
+      if (body.running) {
+        footer.hidden = false;
+        footer.textContent = "Transcoding " + (body.library_percent || 0) + "%";
+      } else if (body.phase && body.phase !== "idle") {
+        footer.hidden = false;
+        footer.textContent = body.phase === "done" ? "Transcode finished" : (body.message || "Transcode");
+      }
+    }
+  }
+
+  function loadTranscodeStatus(applyDefaults) {
+    if (typeof fetch !== "function") return;
+    fetch("/api/transcode")
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        if (!body) return;
+        if (!applyDefaults) delete body.defaults;
+        applyTranscodeStatus(body);
+      })
+      .catch(function () {});
+  }
+
+  function pollTranscode(on) {
+    if (state.transcodeTimer && typeof clearInterval === "function") {
+      clearInterval(state.transcodeTimer);
+      state.transcodeTimer = null;
+    }
+    if (!on || typeof setInterval !== "function") return;
+    state.transcodeTimer = setInterval(function () {
+      loadTranscodeStatus(false);
+    }, 500);
+  }
+
+  function startTranscode() {
+    if (typeof fetch !== "function") return;
+    var hw = $("transcode-hw");
+    var keep = $("transcode-keep");
+    var fetchBox = $("transcode-fetch");
+    fetch("/api/transcode/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rungs: selectedRungs(),
+        hw: hw ? hw.value : "auto",
+        keep_original: !!(keep && keep.checked),
+        fetch_ffmpeg: !!(fetchBox && fetchBox.checked),
+        codec: "h264",
+      }),
+    })
+      .then(function (res) { return res.json().then(function (body) { return { ok: res.ok, body: body }; }); })
+      .then(function (result) {
+        if (result.body) applyTranscodeStatus(result.body);
+        if (!result.ok) {
+          var msg = $("transcode-message");
+          if (msg) msg.textContent = (result.body && (result.body.detail || result.body.error)) || "Could not start";
+          return;
+        }
+        pollTranscode(true);
+      })
+      .catch(function (err) {
+        var msg = $("transcode-message");
+        if (msg) msg.textContent = String(err);
+      });
+  }
+
+  function cancelTranscode() {
+    if (typeof fetch !== "function") return;
+    fetch("/api/transcode/cancel", { method: "POST" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (body) {
+        if (body) applyTranscodeStatus(body);
+      })
+      .catch(function () {});
   }
 
   function bindHud() {
@@ -390,6 +590,13 @@
 
   function onKey(event) {
     var key = event.key;
+    if (state.settingsOpen) {
+      if (isGuideKey(key)) {
+        event.preventDefault();
+        closeSettings();
+      }
+      return;
+    }
     if (state.watching && handleWatchKey(event)) return;
     if (isGuideKey(key)) {
       event.preventDefault();
@@ -1691,6 +1898,7 @@
     if (typeof fetch === "function" && !skipAuto) {
       loadUi();
       loadSchedule();
+      loadTranscodeStatus(true);
     }
     if (typeof setInterval === "function") setInterval(tick, 1000);
   }
@@ -1698,6 +1906,8 @@
   global.LocalCableGuide = {
     init: init,
     applyUi: applyUi,
+    openSettings: openSettings,
+    closeSettings: closeSettings,
     applyTheme: applyTheme,
     rememberProgram: rememberProgram,
     surfChannel: surfChannel,

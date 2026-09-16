@@ -164,6 +164,8 @@ Or: `localcable --organize --inbox ~/Downloads --tv-root ~/Videos/Shows --movies
 
 One-shot rewrite of the library to **H.264 + AAC MP4** so the in-page player can HTTP-Range the file (no live DASH). **H.264, not H.265** — Chrome/Firefox will not play HEVC natively. Assume the originals are backed up; the default is to replace sources after a successful encode.
 
+In the guide: **Settings** (top right) → pick resolutions → **Start transcode**. Library and per-file progress bars update while it runs. You do not need the CLI.
+
 ```bash
 localcable transcode --rungs 1080,720 --hw auto
 localcable transcode --fetch-ffmpeg --dry-run

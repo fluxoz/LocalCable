@@ -821,3 +821,199 @@ body.watching #guide-header {
 body.watching #detail-panel {
   display: none;
 }
+
+#settings-button,
+#transcode-footer {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--time-nav-bg);
+  border: 1px solid var(--footer-border);
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+#settings-button:hover,
+#transcode-footer:hover { background: var(--time-nav-hover); }
+
+#transcode-footer {
+  margin-left: auto;
+  margin-right: 12px;
+}
+
+#settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px 24px;
+}
+
+#settings-overlay[hidden] { display: none; }
+
+#settings-panel {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  background: var(--detail-bg);
+  color: var(--text);
+  border: 1px solid var(--footer-border);
+  border-top: 3px solid var(--selected);
+  border-radius: 4px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  padding: 16px 18px 20px;
+}
+
+#settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#settings-title { margin: 0; font-size: 22px; }
+
+#settings-close {
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--channel-bg);
+  color: var(--text);
+  border: 1px solid var(--footer-border);
+  border-radius: 3px;
+  padding: 4px 12px;
+}
+
+#transcode-settings h3 { margin: 16px 0 6px; font-size: 16px; }
+
+.settings-help {
+  margin: 0 0 12px;
+  color: var(--detail-desc);
+  font-size: 13px;
+  line-height: 1.35;
+  max-width: 62ch;
+}
+
+#transcode-rungs {
+  border: 1px solid var(--footer-border);
+  margin: 0 0 12px;
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+#transcode-rungs legend { padding: 0 6px; color: var(--muted); }
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.settings-row select {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 4px 8px;
+  background: var(--page-bg);
+  color: var(--text);
+  border: 1px solid var(--footer-border);
+}
+
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+#transcode-actions { display: flex; gap: 8px; margin: 12px 0 8px; }
+
+#transcode-start,
+#transcode-cancel {
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 6px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  border: 0;
+}
+
+#transcode-start { background: var(--selected); color: var(--selected-text); }
+#transcode-cancel { background: var(--live-badge); color: #fff; }
+
+#transcode-message {
+  min-height: 1.3em;
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.progress-block { margin-bottom: 10px; }
+
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.progress-track {
+  height: 12px;
+  background: var(--page-bg);
+  border: 1px solid var(--footer-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress-fill,
+#transcode-library-bar,
+#transcode-file-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--selected);
+  transition: width 0.2s linear;
+}
+
+#transcode-files {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--footer-border);
+  background: var(--page-bg);
+  font-size: 12px;
+}
+
+.transcode-file {
+  display: grid;
+  grid-template-columns: 1fr auto 72px;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--grid-line);
+}
+
+.transcode-file-bar {
+  height: 8px;
+  background: var(--channel-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 88px;
+}
+
+.transcode-file-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--header-bg-3);
+}
+
+.transcode-file.is-done .transcode-file-bar > span { background: #3a9d5c; }
+.transcode-file.is-failed .transcode-file-bar > span { background: var(--live-badge); }
+.transcode-file.is-skipped { opacity: 0.7; }
