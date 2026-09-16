@@ -359,3 +359,52 @@ def test_stream_h264_mp4_uses_http_range(
 
 def test_media_response_uses_large_chunks():
     assert MediaFileResponse.chunk_size >= 1024 * 1024
+
+
+def test_transcode_api_status_and_dry_run(tmp_path: Path, media_root: Path, frozen_now: datetime):
+    def runner(argv, **_k):
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        joined = " ".join(str(a) for a in argv)
+        if "-encoders" in argv:
+            Result.stdout = " V..... libx264\n"
+            return Result()
+        Result.stdout = (
+            '{"streams":[{"codec_type":"video","codec_name":"mpeg4",'
+            '"width":16,"height":16}],"format":{"duration":"2.0"}}'
+        )
+        return Result()
+
+    config = _config(tmp_path, media_root)
+    player, _ = _fake_player(tmp_path)
+    state = AppState(
+        config,
+        now_fn=lambda: frozen_now,
+        player=player,
+        probe_runner=runner,
+    )
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        idle = client.get("/api/transcode")
+        assert idle.status_code == 200
+        assert idle.json()["running"] is False
+        assert idle.json()["defaults"]["codec"] == "h264"
+        started = client.post(
+            "/api/transcode/start",
+            json={"rungs": ["native"], "hw": "cpu", "dry_run": True},
+        )
+        assert started.status_code == 200, started.text
+        body = started.json()
+        assert body["ok"] is True
+        deadline = 50
+        snapshot = body
+        while snapshot.get("running") and deadline:
+            snapshot = client.get("/api/transcode").json()
+            deadline -= 1
+        assert snapshot.get("running") is False
+        assert snapshot.get("phase") in {"done", "idle", "cancelled", "error"} or snapshot.get("library_total") >= 0
+        cancel = client.post("/api/transcode/cancel")
+        assert cancel.status_code == 200
