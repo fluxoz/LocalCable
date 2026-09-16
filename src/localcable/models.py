@@ -33,6 +33,7 @@ class MediaFile:
     season: int | None = None
     episode: int | None = None
     episode_title: str | None = None
+    renditions: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -63,6 +64,7 @@ class ScheduledProgram:
     season: int | None = None
     episode: int | None = None
     episode_title: str | None = None
+    renditions: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -82,6 +84,7 @@ class ScheduledProgram:
             "season": self.season,
             "episode": self.episode,
             "episode_title": self.episode_title,
+            "renditions": list(self.renditions),
         }
 
 

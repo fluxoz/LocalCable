@@ -30,6 +30,8 @@ examples:
   localcable --tv-root ~/Videos/Shows --movies-root ~/Videos/Movies
   localcable --headless --config ~/.config/localcable/settings.yaml
   python -m localcable --headed --port 8787 --media-root /media/tv
+  localcable transcode --rungs 1080,720
+  localcable transcode --fetch-ffmpeg --hw auto --dry-run
 """
 
 
@@ -105,12 +107,112 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def build_transcode_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="localcable transcode",
+        description=(
+            "One-time in-place rewrite of the library to browser-native H.264 + AAC MP4. "
+            "Assumes originals are backed up elsewhere. Uses a vendored/static ffmpeg when "
+            "present, with GPU encode (nvenc/qsv/amf/vaapi/videotoolbox) if it works."
+        ),
+    )
+    parser.add_argument("--config", "-c", help="Path to settings.yaml or a config directory")
+    parser.add_argument(
+        "--media-root",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Library root (repeatable).",
+    )
+    parser.add_argument("--tv-root", action="append", default=[], metavar="PATH")
+    parser.add_argument("--movies-root", action="append", default=[], metavar="PATH")
+    parser.add_argument(
+        "--rungs",
+        default=None,
+        help="Comma-separated heights: native,2160,1440,1080,720,480 (never upscales).",
+    )
+    parser.add_argument(
+        "--codec",
+        choices=["h264", "hevc"],
+        default=None,
+        help="h264 (default, Chrome/Firefox native) or hevc (Safari/mpv, smaller).",
+    )
+    parser.add_argument(
+        "--hw",
+        default=None,
+        help="auto, cpu, nvenc, qsv, amf, vaapi, videotoolbox",
+    )
+    parser.add_argument(
+        "--keep-original",
+        action="store_true",
+        help="Leave source files in place (default is replace after success).",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Plan only; do not write files")
+    parser.add_argument(
+        "--fetch-ffmpeg",
+        action="store_true",
+        help="Download a portable static ffmpeg into the vendor dir first.",
+    )
+    parser.add_argument("--ffmpeg", default=None, help="Explicit ffmpeg binary")
+    return parser
+
+
+def transcode_main(argv: list[str]) -> int:
+    from localcable.transcode import parse_rungs, transcode_library
+
+    parser = build_transcode_parser()
+    args = parser.parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    config = load_config(args.config, args=args)
+    roots = list(config.media_roots)
+    if not roots:
+        parser.error("no media library configured")
+    xc = config.library.transcode
+    rungs = parse_rungs(args.rungs if args.rungs is not None else xc.rungs)
+    codec = args.codec or xc.codec
+    hw = args.hw or xc.hw
+    keep = True if args.keep_original else xc.keep_original
+    print(f"LocalCable v{__version__}  transcode-in-place")
+    print(f"Media:  {', '.join(str(p) for p in roots)}")
+    print(f"Rungs:  {', '.join(rungs)}")
+    print(f"Codec:  {codec}  hw={hw}  keep_original={keep}")
+    if args.dry_run:
+        print("Mode:   dry-run")
+    try:
+        result = transcode_library(
+            roots,
+            rungs=rungs,
+            codec=codec,
+            hw=hw,
+            keep_original=keep,
+            dry_run=args.dry_run,
+            fetch=args.fetch_ffmpeg,
+            ffmpeg=args.ffmpeg,
+        )
+    except FileNotFoundError as exc:
+        print(exc)
+        return 2
+    print(
+        f"Done: planned={result.planned} encoded={result.encoded} "
+        f"skipped={result.skipped} failed={result.failed} removed={result.removed}"
+    )
+    for err in result.errors:
+        print(f"  error: {err}")
+    return 1 if result.failed else 0
+
+
 def public_url(host: str, port: int) -> str:
     shown = "127.0.0.1" if host in {"0.0.0.0", "::", "[::]"} else host
     return f"http://{shown}:{port}/"
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "transcode":
+        return transcode_main(argv[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(
