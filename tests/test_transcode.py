@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
+import pytest
+
+from localcable.ffmpeg import resolve_ffmpeg
 from localcable.main import main
 from localcable.transcode import (
     already_native,
@@ -101,8 +105,10 @@ def test_transcode_argv_is_h264_aac():
     assert "libx264" in argv
     assert "aac" in argv
     assert "+faststart" in argv
+    assert argv[argv.index("-f") + 1] == "mp4"
     assert "scale=-2:720:flags=lanczos" in argv
     assert "hevc" not in argv and "libx265" not in argv
+    assert str(argv[-1]).endswith(".mp4")
 
 
 def test_transcode_library_dry_run(tmp_path: Path):
@@ -140,6 +146,32 @@ def test_transcode_library_dry_run(tmp_path: Path):
     )
     assert result.planned >= 1
     assert result.encoded == 0
+
+
+def test_real_ffmpeg_accepts_partial_mp4_output(tmp_path: Path):
+    from tests.helpers import make_video
+
+    try:
+        ffmpeg = resolve_ffmpeg()
+    except FileNotFoundError:
+        pytest.skip("ffmpeg not installed")
+    src = make_video(tmp_path / "clip.mkv", 0.4, codec="mpeg4")
+    dest = tmp_path / "clip.mp4"
+    tmp = dest.with_name(dest.stem + ".partial" + dest.suffix)
+    argv = transcode_argv(
+        src,
+        tmp,
+        ffmpeg=ffmpeg,
+        encoder="libx264",
+        hw_name="cpu",
+        height=None,
+        crf=28,
+        maxrate="1M",
+        copy_audio=False,
+    )
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert tmp.is_file() and tmp.stat().st_size > 0
 
 
 def test_progress_seconds_from_ffmpeg_fields():
