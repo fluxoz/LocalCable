@@ -134,6 +134,7 @@ def test_js_is_browser_script_without_node_modules():
     assert "applyCrtClass" in js
     assert "openSettings" in js
     assert "/api/transcode/start" in js
+    assert "show_settings" in js
     assert "transcode-library-bar" in js
     assert "nextProgram" in js
     assert "onVideoEnded" in js

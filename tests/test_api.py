@@ -135,6 +135,7 @@ def test_index_and_logo(tmp_path: Path, media_root: Path, frozen_now: datetime):
         assert body["player"] == "mpv"
         assert body["inpage_filter"] == "css"
         assert body["theme"] == "default"
+        assert body["show_settings"] is True
         assert "header_bg" in body["colors"]
         assert set(body["presets"]) >= {"default", "dark", "modern", "retro-green", "miami-vice", "dark-blue"}
         vendor = client.get("/static/vendor/dash.all.min.js")

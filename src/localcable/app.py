@@ -737,6 +737,7 @@ def create_app(
                 "start_from": bundle.config.playback.start_from,
                 "filter": bundle.config.playback.filter,
                 "inpage_filter": bundle.config.playback.inpage_filter,
+                "show_settings": bundle.config.ui.show_settings,
             },
             headers={"Cache-Control": "no-store"},
         )
