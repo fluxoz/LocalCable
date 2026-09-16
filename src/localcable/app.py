@@ -38,6 +38,7 @@ from localcable.remote import (
     step_channel,
 )
 from localcable.schedule import generate_schedule
+from localcable.transcode import TranscodeManager, parse_rungs
 from localcable.util import live_offset_seconds
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,15 @@ class RemoteRequest(BaseModel):
 class SelectRequest(BaseModel):
     program_id: str | None = None
     channel: int | None = None
+
+
+class TranscodeStartRequest(BaseModel):
+    rungs: list[str] | str | None = None
+    codec: str | None = None
+    hw: str | None = None
+    keep_original: bool | None = None
+    fetch_ffmpeg: bool = False
+    dry_run: bool = False
 
 
 def _now_local() -> datetime:
@@ -154,6 +164,7 @@ class AppState:
         self._digit_timer: threading.Timer | None = None
         self._remote_stop: threading.Event | None = None
         self._lock = threading.RLock()
+        self.transcode = TranscodeManager()
 
     def _path_key(self, path: Path | str) -> str:
         src = Path(path)
@@ -632,6 +643,32 @@ class AppState:
             self._remote_stop.set()
             self._remote_stop = None
 
+    def transcode_defaults(self) -> dict[str, Any]:
+        xc = self.config.library.transcode
+        return {
+            "rungs": list(xc.rungs),
+            "codec": xc.codec,
+            "hw": xc.hw,
+            "keep_original": xc.keep_original,
+        }
+
+    def start_transcode(self, body: TranscodeStartRequest) -> dict[str, Any]:
+        xc = self.config.library.transcode
+        rungs = parse_rungs(body.rungs if body.rungs is not None else xc.rungs)
+        keep = xc.keep_original if body.keep_original is None else bool(body.keep_original)
+        snapshot = self.transcode.start(
+            self.config.media_roots,
+            rungs=rungs,
+            codec=body.codec or xc.codec,
+            hw=body.hw or xc.hw,
+            keep_original=keep,
+            dry_run=bool(body.dry_run),
+            fetch=bool(body.fetch_ffmpeg),
+            runner=self.probe_runner,
+            smoke=self.probe_runner is None,
+        )
+        return {"ok": True, "defaults": self.transcode_defaults(), **snapshot}
+
 
 def _index_html(banner: str | None = None) -> str:
     index = STATIC_DIR / "index.html"
@@ -850,6 +887,27 @@ def create_app(
             media_type=mime_for(name),
             headers={"Cache-Control": cache, "Accept-Ranges": "bytes"},
         )
+
+    @app.get("/api/transcode")
+    def api_transcode_status() -> JSONResponse:
+        return JSONResponse(
+            {"ok": True, "defaults": bundle.transcode_defaults(), **bundle.transcode.snapshot()},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/transcode/start")
+    def api_transcode_start(body: TranscodeStartRequest) -> JSONResponse:
+        try:
+            result = bundle.start_transcode(body)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        return JSONResponse(result)
+
+    @app.post("/api/transcode/cancel")
+    def api_transcode_cancel() -> JSONResponse:
+        return JSONResponse({"ok": True, **bundle.transcode.cancel()})
 
     @app.post("/api/show-guide")
     def api_show_guide() -> JSONResponse:

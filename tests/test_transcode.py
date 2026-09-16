@@ -10,6 +10,7 @@ from localcable.transcode import (
     output_name,
     parse_rungs,
     plan_file,
+    progress_seconds,
     target_heights,
     transcode_argv,
     transcode_library,
@@ -139,6 +140,49 @@ def test_transcode_library_dry_run(tmp_path: Path):
     )
     assert result.planned >= 1
     assert result.encoded == 0
+
+
+def test_progress_seconds_from_ffmpeg_fields():
+    assert progress_seconds({"out_time_us": "1500000"}) == 1.5
+    assert progress_seconds({"out_time": "00:00:02.5"}) == 2.5
+
+
+def test_transcode_library_reports_progress(tmp_path: Path):
+    src = tmp_path / "101_CNN" / "news.mkv"
+    src.parent.mkdir()
+    src.write_bytes(b"x")
+    events: list[dict] = []
+
+    def runner(argv, **_k):
+        class Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        if "-encoders" in argv:
+            Result.stdout = " V..... libx264\n"
+            return Result()
+        Result.stdout = (
+            '{"streams":[{"codec_type":"video","codec_name":"mpeg4",'
+            '"width":1280,"height":720}],"format":{"duration":"2.0"}}'
+        )
+        return Result()
+
+    ffmpeg = tmp_path / "ffmpeg"
+    ffmpeg.write_text("x", encoding="utf-8")
+    transcode_library(
+        [tmp_path],
+        rungs=["720"],
+        hw="cpu",
+        dry_run=True,
+        ffmpeg=str(ffmpeg),
+        runner=runner,
+        smoke=False,
+        on_progress=events.append,
+    )
+    assert events
+    assert any(ev.get("files") for ev in events)
+    assert any(ev.get("library_total", 0) >= 1 for ev in events)
 
 
 def test_cli_transcode_help():

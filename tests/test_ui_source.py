@@ -33,6 +33,12 @@ def test_html_has_guide_landmarks():
         'id="hud-info"',
         'id="info-banner"',
         'id="stage"',
+        'id="settings-button"',
+        'id="settings-overlay"',
+        'id="transcode-start"',
+        'id="transcode-library-bar"',
+        'id="transcode-file-bar"',
+        'id="transcode-files"',
         "TV Listings",
         "/static/vendor/dash.all.min.js",
     ):
@@ -60,6 +66,9 @@ def test_css_has_layout_hooks():
         "#hud",
         "#hud-crt-label",
         "#info-banner",
+        "#settings-overlay",
+        "#transcode-library-bar",
+        ".progress-fill",
         ".program-title",
         ".program-episode",
         ".ch-num",
@@ -123,6 +132,9 @@ def test_js_is_browser_script_without_node_modules():
     assert "activeFilter" in js
     assert "/api/preview/" in js
     assert "applyCrtClass" in js
+    assert "openSettings" in js
+    assert "/api/transcode/start" in js
+    assert "transcode-library-bar" in js
     assert "nextProgram" in js
     assert "onVideoEnded" in js
     assert 'addEventListener("ended"' in js
