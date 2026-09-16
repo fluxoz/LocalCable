@@ -12,7 +12,7 @@ Everything runs **offline** on Linux except optional keyless artwork/metadata lo
 ## Requirements
 
 - Python 3.11+ (3.14 is fine) and [uv](https://docs.astral.sh/uv/) (or pip)
-- `ffmpeg` / `ffprobe` (durations, tags, and MPEG-DASH packaging for the in-page player)
+- `ffmpeg` / `ffprobe` (durations, tags, MPEG-DASH, and optional in-place transcode). `localcable transcode --fetch-ffmpeg` vendors a portable static build.
 - `mpv` (optional local playback via IPC; the in-page player does not need it)
 - Optional: [ntsc-rs](https://ntsc.rs/) CRT/VHS look on mpv. The **ntscrs frei0r plugin is vendored** (Linux x86_64, macOS arm64, Windows x86_64). Other platforms fall back to a 480p scanline/noise stand-in.
 
@@ -159,6 +159,17 @@ Or: `localcable --organize --inbox ~/Downloads --tv-root ~/Videos/Shows --movies
 
 - **Title** comes from embedded tags when present, otherwise a cleaned filename (`evening_news.mkv` → `Evening News`). **Duration** comes from ffprobe. Missing description/rating never crashes the scan.
 - **Cover art** (guide poster slot) is local first: `evening_news.jpg` next to the file, or `poster.jpg` / `cover.jpg` / `folder.jpg` in the channel folder. Embedded posters inside the video are extracted when present. If nothing local is found and `artwork.fetch` is on (default), LocalCable asks TVMaze then the iTunes Search API — **no API key** — and caches the image. Set `artwork.fetch: false` to stay fully offline.
+
+### Transcode in place (native browser playback)
+
+One-shot rewrite of the library to **H.264 + AAC MP4** so the in-page player can HTTP-Range the file (no live DASH). **H.264, not H.265** — Chrome/Firefox will not play HEVC natively. Assume the originals are backed up; the default is to replace sources after a successful encode.
+
+```bash
+localcable transcode --rungs 1080,720 --hw auto
+localcable transcode --fetch-ffmpeg --dry-run
+```
+
+`--rungs` never upscales. Multiple rungs sit alongside (`Show.S01E01.1080p.mp4`, `Show.S01E01.720p.mp4`) and the guide treats them as one program. `--hw auto` smoke-tests NVIDIA NVENC, Intel QSV, AMD AMF, VAAPI, then VideoToolbox, then `libx264`. Defaults live under `library.transcode` in `settings.yaml`.
 
 ## Sequential vs random
 

@@ -85,10 +85,11 @@ def run_ffprobe(
     *,
     streams_only: bool = False,
     bounded: bool = True,
+    binary: str | None = None,
 ) -> dict[str, Any]:
     """Return parsed ffprobe JSON, or {} on any failure (never raises)."""
     run = runner or subprocess.run
-    argv = ["ffprobe", "-v", "error"]
+    argv = [binary or "ffprobe", "-v", "error"]
     if bounded:
         argv += [
             "-probesize",

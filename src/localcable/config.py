@@ -68,6 +68,16 @@ class LineupConfig:
 
 
 @dataclass
+class TranscodeConfig:
+    """One-time in-place rewrite to browser-native MP4. Originals assumed backed up."""
+
+    rungs: list[str] = field(default_factory=lambda: ["native"])
+    codec: str = "h264"
+    hw: str = "auto"
+    keep_original: bool = False
+
+
+@dataclass
 class LibraryConfig:
     """Jellyfin-layout libraries, auto channel lineup, and optional auto-organize."""
 
@@ -76,6 +86,7 @@ class LibraryConfig:
     fetch_metadata: bool = True
     auto_channels: bool = True
     min_channels: int = 0
+    transcode: TranscodeConfig = field(default_factory=TranscodeConfig)
 
 
 @dataclass
@@ -415,12 +426,26 @@ def load_config(
     auto_channels = lib_raw.get("auto_channels")
     if auto_channels is None:
         auto_channels = True
+    xc_raw = lib_raw.get("transcode") or {}
+    rungs_raw = xc_raw.get("rungs", ["native"])
+    if isinstance(rungs_raw, str):
+        rungs_list = [part.strip() for part in rungs_raw.split(",") if part.strip()]
+    elif isinstance(rungs_raw, (list, tuple)):
+        rungs_list = [str(part).strip() for part in rungs_raw if str(part).strip()]
+    else:
+        rungs_list = ["native"]
     library = LibraryConfig(
         auto_organize=bool(lib_raw.get("auto_organize", False)),
         inbox=_as_path(inbox) if inbox else None,
         fetch_metadata=bool(lib_raw.get("fetch_metadata", True)),
         auto_channels=bool(auto_channels),
         min_channels=max(0, int(lib_raw.get("min_channels", 0) or 0)),
+        transcode=TranscodeConfig(
+            rungs=rungs_list or ["native"],
+            codec=str(xc_raw.get("codec", "h264")),
+            hw=str(xc_raw.get("hw", "auto")),
+            keep_original=bool(xc_raw.get("keep_original", False)),
+        ),
     )
     lineup = _parse_lineup(lineup_raw)
     logo_filename = str(raw.get("logo", DEFAULT_LOGO_FILENAME))
