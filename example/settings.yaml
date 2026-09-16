@@ -24,6 +24,13 @@ library:
   # inbox: ~/Downloads
   fetch_metadata: true
   min_channels: 0               # pad the guide by repeating channels (try 24)
+  # One-time rewrite to browser-native H.264+AAC MP4. Originals assumed backed up.
+  #   localcable transcode --rungs 1080,720 --hw auto
+  transcode:
+    rungs: [native]
+    codec: h264                 # h264 = Chrome/Firefox native; hevc = smaller, not Chrome
+    hw: auto                    # auto | cpu | nvenc | qsv | amf | vaapi | videotoolbox
+    keep_original: false
 
 # Optional: defaults to the directory that contains this file.
 # config_dir: ~/.config/localcable
