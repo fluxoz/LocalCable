@@ -92,6 +92,7 @@
     transcodeTimer: null,
     transcodeRunning: false,
     transcodeWasRunning: false,
+    settingsAllowed: true,
     previewId: null,
     previewTimer: null,
   };
@@ -296,6 +297,7 @@
   }
 
   function openSettings() {
+    if (state.settingsAllowed === false) return;
     var overlay = $("settings-overlay");
     if (overlay) overlay.hidden = false;
     state.settingsOpen = true;
@@ -1846,6 +1848,13 @@
     if (ui.player) state.playerMode = String(ui.player);
     if (ui.start_from) state.startFrom = String(ui.start_from);
     if (ui.inpage_filter) state.inpageFilter = String(ui.inpage_filter);
+    if (Object.prototype.hasOwnProperty.call(ui, "show_settings")) {
+      var show = ui.show_settings !== false && ui.show_settings !== "false" && ui.show_settings !== 0;
+      var settingsBtn = $("settings-button");
+      if (settingsBtn) settingsBtn.hidden = !show;
+      state.settingsAllowed = show;
+      if (!show) closeSettings();
+    }
     if (ui.filter) {
       var mode = String(ui.filter);
       if (mode === "ntsc" || mode === "vhs") {

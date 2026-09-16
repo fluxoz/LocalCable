@@ -48,6 +48,7 @@ def test_load_yaml_settings(tmp_path: Path):
     assert config.logo_path == tmp_path / "mylogo.png"
     assert config.public_base_url == "http://127.0.0.1:9191"
     assert config.remote.device is None
+    assert config.ui.show_settings is True
     assert config.remote.digit_timeout_ms == 1400
     assert config.artwork.fetch is True
     assert "--profile=fast" in config.playback.mpv_args
@@ -150,6 +151,37 @@ def test_normalize_player_aliases():
     assert normalize_player("mpv") == "mpv"
     assert normalize_player("both") == "both"
     assert normalize_player(None) == "browser"
+
+
+def test_show_settings_can_be_hidden(tmp_path: Path):
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        "\n".join(
+            [
+                f"media_roots:",
+                f"  - {tmp_path / 'media'}",
+                "ui:",
+                "  show_settings: false",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(settings)
+    assert config.ui.show_settings is False
+    settings.write_text(
+        "\n".join(
+            [
+                f"media_roots:",
+                f"  - {tmp_path / 'media'}",
+                "ui:",
+                "  hide_settings: true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert load_config(settings).ui.show_settings is False
 
 
 def test_theme_and_color_overrides_from_yaml(tmp_path: Path):

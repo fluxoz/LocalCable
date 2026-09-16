@@ -70,6 +70,7 @@ ui:
   # miami-vice, dark-blue. "xfinity" is an alias for default.
   theme: default
   banner: TV Listings             # top-right header text (try "guide")
+  show_settings: true             # false hides the Settings button (transcode UI)
   auto_open_browser: true         # headed mode
   # 127.0.0.1 = this machine only. 0.0.0.0 = other devices on the LAN can open the guide.
   bind_host: 127.0.0.1
