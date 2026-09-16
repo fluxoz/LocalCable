@@ -380,9 +380,14 @@ class DashPackager:
             raise TimeoutError("DASH manifest was not ready in time")
         self._stop(pack_id)
         self._clean_dest(dest)
-        binary = self._which("ffmpeg")
-        if not binary:
-            raise FileNotFoundError("ffmpeg not found on PATH")
+        try:
+            from localcable.ffmpeg import resolve_ffmpeg
+
+            binary = resolve_ffmpeg(which=self._which)
+        except FileNotFoundError:
+            binary = self._which("ffmpeg")
+            if not binary:
+                raise FileNotFoundError("ffmpeg not found on PATH") from None
         plan = "xcode" if vf else self._cached_plan(src)
         child_env = self._child_env()
         if plan in {"copy", "audio"}:

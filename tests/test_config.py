@@ -52,6 +52,8 @@ def test_load_yaml_settings(tmp_path: Path):
     assert config.artwork.fetch is True
     assert "--profile=fast" in config.playback.mpv_args
     assert config.playback.mpv_args == list(DEFAULT_MPV_ARGS)
+    assert config.library.transcode.codec == "h264"
+    assert config.library.transcode.hw == "auto"
 
 
 def test_libraries_and_browser_player_from_yaml(tmp_path: Path):

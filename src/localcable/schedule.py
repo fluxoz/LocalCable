@@ -68,6 +68,7 @@ def _airing(media: MediaFile, channel: Channel, start: datetime) -> ScheduledPro
         season=media.season,
         episode=media.episode,
         episode_title=media.episode_title,
+        renditions=list(media.renditions),
     )
 
 

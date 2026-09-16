@@ -274,6 +274,11 @@ def scan_media_root(
         except OSError as exc:
             log.warning("cannot list channel folder %s: %s", folder, exc)
             files = []
+        from localcable.transcode import collapse_rendition_files
+
+        grouped = collapse_rendition_files(files)
+        files = [primary for primary, _rends in grouped]
+        rendition_map = {str(primary.resolve()): rends for primary, rends in grouped}
         for file_path in files:
             key = str(file_path.resolve()) if file_path.exists() else str(file_path)
             cached = _media_from_cache(file_path, cache.get(key) or {}) if key in cache else None
@@ -292,6 +297,9 @@ def scan_media_root(
             media.append(item)
             cache[str(item.path)] = _cache_record(file_path, item)
             cache_dirty = True
+        for item in media:
+            rends = rendition_map.get(str(item.path.resolve())) or []
+            item.renditions = [r.to_dict() for r in rends]
         playlist = find_playlist(folder)
         channels.append(
             Channel(

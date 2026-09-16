@@ -13,3 +13,10 @@ htmlcov/
 .mypy_cache/
 *.sock
 *.log
+src/localcable/vendor/ffmpeg/*/ffmpeg
+src/localcable/vendor/ffmpeg/*/ffmpeg.exe
+src/localcable/vendor/ffmpeg/*/ffprobe
+src/localcable/vendor/ffmpeg/*/ffprobe.exe
+src/localcable/vendor/ffmpeg/*/*.zip
+src/localcable/vendor/ffmpeg/*/*.tar.xz
+src/localcable/vendor/ffmpeg/*/*download*

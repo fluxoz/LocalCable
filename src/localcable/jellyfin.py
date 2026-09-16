@@ -278,6 +278,7 @@ def scan_tv_root(
     dirty = False
     parsed: list[tuple[int | None, str, Path]] = []
     series_files: dict[Path, list[Path]] = {}
+    series_renditions: dict[Path, dict[str, list]] = {}
     try:
         series_dirs = [p for p in root.iterdir() if p.is_dir() and not _skip_dir(p.name)]
     except OSError as exc:
@@ -303,7 +304,13 @@ def scan_tv_root(
                     continue
         files.extend(loose)
         files.sort(key=lambda p: _episode_sort_key(p))
-        series_files[series] = files
+        from localcable.transcode import collapse_rendition_files
+
+        grouped = collapse_rendition_files(files)
+        series_files[series] = [primary for primary, _rends in grouped]
+        series_renditions[series] = {
+            str(primary.resolve()): rends for primary, rends in grouped
+        }
 
     channels: list[Channel] = []
     for number, name, folder in assign_channel_numbers(parsed):
@@ -314,7 +321,10 @@ def scan_tv_root(
             cache=cache,
         )
         dirty = dirty or d
+        rmap = series_renditions.get(folder, {})
         for item in media:
+            rends = rmap.get(str(item.path.resolve())) or []
+            item.renditions = [r.to_dict() for r in rends]
             annotate_episode_fields(item)
             tag = parse_episode_tag(item.path.name)
             if tag:
@@ -362,6 +372,7 @@ def scan_movies_root(
     cache_file = Path(cache_dir) / "probe.json" if cache_dir is not None else None
     cache: dict[str, Any] = _load_probe_cache(cache_file) if cache_file else {}
     files: list[Path] = []
+    folder_rends: dict[str, list] = {}
     try:
         children = list(root.iterdir())
     except OSError as exc:
@@ -377,11 +388,25 @@ def scan_movies_root(
                 videos = []
             videos.sort(key=lambda p: natural_key(p.name))
             if videos:
-                files.append(videos[0])
+                from localcable.transcode import collapse_rendition_files
+
+                grouped = collapse_rendition_files(videos)
+                grouped.sort(key=lambda row: natural_key(row[0].name))
+                primary, rends = grouped[0]
+                files.append(primary)
+                folder_rends[str(primary.resolve())] = rends
         elif is_video_file(child):
             files.append(child)
+    from localcable.transcode import collapse_rendition_files
+
+    grouped = collapse_rendition_files(files)
+    rendition_map = {str(primary.resolve()): rends for primary, rends in grouped}
+    rendition_map.update(folder_rends)
+    files = [primary for primary, _rends in grouped]
     media, dirty = _probe_many(files, probe_runner=probe_runner, probe_fn=probe_fn, cache=cache)
     for item in media:
+        rends = rendition_map.get(str(item.path.resolve())) or []
+        item.renditions = [r.to_dict() for r in rends]
         title, year = parse_movie_label(item.path.parent.name if item.path.parent != root else item.path.stem)
         if title:
             item.title = f"{title} ({year})" if year else title
