@@ -99,6 +99,7 @@ class UiConfig:
     bind_host: str = DEFAULT_BIND_HOST
     bind_port: int = DEFAULT_BIND_PORT
     banner: str = DEFAULT_BANNER
+    show_settings: bool = True
 
     def resolved_theme(self) -> dict[str, Any]:
         extra: dict[str, Any] = dict(self.colors)
@@ -241,6 +242,27 @@ def normalize_kind(value: Any, default: str = "channels") -> str:
     if text in {"auto", "lineup", "cable"}:
         return "auto"
     return default
+
+
+def _parse_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_show_settings(ui_raw: dict[str, Any]) -> bool:
+    if "show_settings" in ui_raw:
+        return _parse_bool(ui_raw.get("show_settings"), True)
+    if "hide_settings" in ui_raw:
+        return not _parse_bool(ui_raw.get("hide_settings"), False)
+    return True
 
 
 def _parse_colors(value: Any) -> dict[str, str]:
@@ -415,6 +437,7 @@ def load_config(
         bind_host=str(ui_raw.get("bind_host", DEFAULT_BIND_HOST)),
         bind_port=int(ui_raw.get("bind_port", DEFAULT_BIND_PORT)),
         banner=banner_text(ui_raw.get("banner", DEFAULT_BANNER)),
+        show_settings=_parse_show_settings(ui_raw),
     )
     device = remote_raw.get("device")
     remote = RemoteConfig(
