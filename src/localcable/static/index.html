@@ -12,6 +12,7 @@
       <div id="header-top">
         <img id="provider-logo" src="/logo" alt="Provider logo">
         <div id="header-labels">
+          <button type="button" id="settings-button">Settings</button>
           <span id="header-label" class="with-mail">TV Listings</span>
           <span id="clock" aria-live="polite"></span>
         </div>
@@ -54,8 +55,69 @@
 
     <footer id="guide-footer">
       <span id="footer-status">Arrows move · OK/Enter watch · Esc guide · CH+/− or numbers tune · i info</span>
+      <button type="button" id="transcode-footer" hidden></button>
       <span id="footer-meta"></span>
     </footer>
+  </div>
+
+  <div id="settings-overlay" hidden>
+    <div id="settings-panel" role="dialog" aria-labelledby="settings-title">
+      <div id="settings-head">
+        <h2 id="settings-title">Settings</h2>
+        <button type="button" id="settings-close">Close</button>
+      </div>
+      <section id="transcode-settings">
+        <h3>Transcode for native playback</h3>
+        <p class="settings-help">
+          Rewrites the library to H.264 + AAC MP4 so the guide can play files at disk/network
+          speed. Originals are assumed backed up and replaced after a successful encode unless
+          you keep them. Never upscales.
+        </p>
+        <fieldset id="transcode-rungs">
+          <legend>Resolutions</legend>
+          <label><input type="checkbox" name="rung" value="native" checked> Native</label>
+          <label><input type="checkbox" name="rung" value="2160"> 2160p</label>
+          <label><input type="checkbox" name="rung" value="1440"> 1440p</label>
+          <label><input type="checkbox" name="rung" value="1080"> 1080p</label>
+          <label><input type="checkbox" name="rung" value="720"> 720p</label>
+          <label><input type="checkbox" name="rung" value="480"> 480p</label>
+        </fieldset>
+        <div class="settings-row">
+          <label for="transcode-hw">Hardware</label>
+          <select id="transcode-hw">
+            <option value="auto">Auto (GPU if it works)</option>
+            <option value="cpu">CPU (libx264)</option>
+            <option value="nvenc">NVIDIA NVENC</option>
+            <option value="qsv">Intel QSV</option>
+            <option value="amf">AMD AMF</option>
+            <option value="vaapi">VAAPI</option>
+            <option value="videotoolbox">VideoToolbox</option>
+          </select>
+        </div>
+        <label class="settings-check"><input type="checkbox" id="transcode-keep"> Keep original files</label>
+        <label class="settings-check"><input type="checkbox" id="transcode-fetch"> Download portable ffmpeg first</label>
+        <div id="transcode-actions">
+          <button type="button" id="transcode-start">Start transcode</button>
+          <button type="button" id="transcode-cancel" hidden>Cancel</button>
+        </div>
+        <p id="transcode-message"></p>
+        <div class="progress-block">
+          <div class="progress-label">
+            <span>Library</span>
+            <span id="transcode-library-label">0%</span>
+          </div>
+          <div class="progress-track" aria-hidden="true"><div id="transcode-library-bar" class="progress-fill"></div></div>
+        </div>
+        <div class="progress-block">
+          <div class="progress-label">
+            <span id="transcode-file-name">Current file</span>
+            <span id="transcode-file-label">0%</span>
+          </div>
+          <div class="progress-track" aria-hidden="true"><div id="transcode-file-bar" class="progress-fill"></div></div>
+        </div>
+        <div id="transcode-files"></div>
+      </section>
+    </div>
   </div>
 
   <div id="stage" hidden>
