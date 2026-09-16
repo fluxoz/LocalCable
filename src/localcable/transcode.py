@@ -357,7 +357,7 @@ def transcode_argv(
         argv += ["-c:a", "copy"]
     else:
         argv += ["-c:a", "aac", "-ac", "2", "-b:a", "192k"]
-    argv += ["-movflags", "+faststart", str(dest)]
+    argv += ["-movflags", "+faststart", "-f", "mp4", str(dest)]
     return argv
 
 
@@ -605,7 +605,7 @@ def transcode_library(
                 row_i += 1
                 continue
             crf, maxrate = _quality_for(job.height)
-            tmp = job.dest.with_name(job.dest.name + ".partial")
+            tmp = job.dest.with_name(job.dest.stem + ".partial" + job.dest.suffix)
             argv = transcode_argv(
                 src,
                 tmp,
