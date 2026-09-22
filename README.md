@@ -75,7 +75,8 @@ LocalCable understands classic channel folders and Jellyfin Movies/Shows trees. 
 
 - One channel per **immediate subfolder** of the media root.
 - Optional leading `NNN_` is the channel number and sort key (`101_CNN` → channel 101, name `CNN`).
-- Folders without a number are sorted by name and given unused numbers starting at 1.
+- Folders without a number get a **stable random 3-digit channel** (000–999). The same folder keeps its number across restarts. The guide always shows three digits, so channel 7 is `007` and channel 100 is `100`.
+- Channel **names and numbers are centered** in the guide column. Names display in **ALL CAPS**.
 - Empty folders still appear as channels (the row shows “No programming” until you add videos).
 - Common video files in each folder become programs (non-recursive).
 - `playlist.m3u` / `playlist.txt` (if present) sets sequential order; otherwise files are sorted by name. Sequential mode **loops** to fill the window.
@@ -108,14 +109,32 @@ uv run localcable --media-root ~/Videos
 ~/Videos/                                 ← --media-root  (auto-detected)
 ├── Movies/
 │   └── Heat (1995)/Heat (1995).mkv
-└── Shows/
-    └── The Office (2005)/Season 01/…
+├── Shows/
+│   └── The Office (2005)/Season 01/…
+├── custom_channel/                       ← legacy folder-per-channel, added beside the genre lineup
+│   ├── 101_CNN/evening_news.mp4
+│   └── Local News/bulletin.mp4
+└── music_video/                          ← one named channel per subfolder
+    └── 90s Hits/
+        ├── track.mp4
+        └── Artist/another.mp4            ← nested files stay on "90s Hits"
 ```
 
 - **Genre lineup (default).** Movies and TV episodes are mixed onto cable channels. Defaults include Horror → **Nightfall**, action → **Thunderbolt**, comedy → **Chuckle**, sitcoms → **Sitcom Row**, sci-fi → **Starline**, fantasy → **Aether**, kids/animation → **Toonbox**, anime → **Toonami**, drama → **Prime**, unlabeled → **Local 8**, plus extra invented networks (After Dark, Cape, Gridiron, Jukebox, …). Names are **configurable** in `settings.yaml` (see below). Empty genres are omitted. Genre comes from `.nfo` / embedded tags, then optional TVMaze (TV) and iTunes (movies) when `library.fetch_metadata` is on.
 - Episodes of a show stay in `SxxExx` order and are woven with movies on that channel.
 - `kind: tv` still means **one channel per series**. `kind: movies` is still one **Movies** channel. Use those when you do not want the mix.
 - `featurettes`, `extras`, `trailers`, and similar sidecar folders are skipped.
+- **`custom_channel/`** (also `custom channels`) uses the legacy layout: each subfolder is a channel, including `NNN_Name`. Those channels are added **in addition to** the genre lineup.
+- **`music_video/`** (also `music videos`) makes one channel per subfolder. The folder name is the channel name. Videos in nested folders stay on that channel. Loose files in `music_video/` itself become a **Music Videos** channel.
+- Point those folders somewhere else from `settings.yaml` if the conventional names are not the ones on disk:
+
+```yaml
+libraries:
+  - path: ~/Videos
+    kind: auto
+    custom_channels: ~/Videos/my_channels
+    music_videos: ~/Videos/clips
+```
 
 ```yaml
 libraries:
@@ -224,6 +243,8 @@ See `example/settings.yaml` for a full template.
 
 ## Start commands
 
+Headed mode opens a browser once the server is listening. The page shows the stand-by splash and a loading bar while the library scan finishes, then the guide.
+
 Headed (serves the UI and opens a browser):
 
 ```bash
@@ -303,6 +324,7 @@ ip -4 addr show
 - The header clock and the red **now** line use **this machine’s local time**.
 - **Watch** or **double-click** joins the airing **where the timeline says you are** (`playback.start_from: live`, the default). A 4:00 show watched at 4:20 starts 20 minutes in. **Start over** on the HUD (or `start_from: beginning`) plays from 0:00.
 - Playback is in-page: browser-friendly **H.264 MP4** is streamed directly (HTTP Range from the original file — this is the fast NFS path). H.264+AAC in other containers (typical Jellyfin `.mkv`) is **stream-copied** into MPEG-DASH without a CPU transcode, including live join-in-progress. HEVC, MPEG-4, AC-3, etc. still transcode (capped at 720p, starting at the join-in point). Repeat airings reuse the cache.
+- When a title **ends**, playback starts the **next title on that channel** from 0:00 (the in-page player and `playback.player: mpv`). The channel loops when the guide window runs out of later programs.
 - A cable-style **HUD** (channel, title, seek, volume, CH+/−, Start over, Guide) sits on the video; it auto-hides and is meant to be driven by a remote. Press **i** to pin/unpin it. Set `playback.player: mpv` to use a local mpv window instead.
 - **Esc** / **Guide** stay in this tab: they leave fullscreen video and show the grid. The clip keeps playing muted in the inset. They do not open a new tab, quit mpv, or resize the player window.
 

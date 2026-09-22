@@ -157,6 +157,12 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
     hasToggleInfo: !!(window.LocalCableGuide && window.LocalCableGuide.toggleInfoBanner),
     channelNum: chCell && chCell.querySelector(".ch-num") ? chCell.querySelector(".ch-num").textContent : "",
     channelName: chCell && chCell.querySelector(".ch-name") ? chCell.querySelector(".ch-name").textContent : "",
+    channelAlign: chCell ? getComputedStyle(chCell).textAlign : "",
+    numAlign: chCell && chCell.querySelector(".ch-num") ? getComputedStyle(chCell.querySelector(".ch-num")).textAlign : "",
+    nameAlign: chCell && chCell.querySelector(".ch-name") ? getComputedStyle(chCell.querySelector(".ch-name")).textAlign : "",
+    nameTransform: chCell && chCell.querySelector(".ch-name") ? getComputedStyle(chCell.querySelector(".ch-name")).textTransform : "",
+    hasSplash: !!document.getElementById("splash"),
+    hasSplashFill: !!document.getElementById("splash-fill"),
     officeTitle: office && office.querySelector(".program-title") ? office.querySelector(".program-title").textContent : "",
     officeEpisode: office && office.querySelector(".program-episode") ? office.querySelector(".program-episode").textContent : "",
     parsedTitle: lines.title || "",
@@ -212,6 +218,12 @@ window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
     assert report["hasToggleInfo"] is True
     assert report["channelNum"] == "101"
     assert report["channelName"] == "CNN"
+    assert report["channelAlign"] == "center"
+    assert report["numAlign"] == "center"
+    assert report["nameAlign"] == "center"
+    assert report["nameTransform"] == "uppercase"
+    assert report["hasSplash"] is True
+    assert report["hasSplashFill"] is True
     assert report["officeTitle"] == "The Office"
     assert "S01E01" in report["officeEpisode"]
     assert "Pilot" in report["officeEpisode"]

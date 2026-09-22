@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -107,17 +108,56 @@ def find_playlist(folder: Path) -> list[Path] | None:
     return parse_playlist_file(chosen, folder)
 
 
-def _next_free_number(used: set[int]) -> int:
-    candidate = 1
-    while candidate in used:
-        candidate += 1
-    return candidate
+def stable_channel_number(key: str, used: set[int]) -> int:
+    """Stable pseudo-random channel in 000–999, skipping numbers already taken.
+
+    The same folder or name keeps its number across restarts. The value is still
+    a 3-digit channel, so the guide can show leading zeros (007) and trailing
+    zeros (100).
+    """
+    digest = hashlib.sha256(str(key).encode("utf-8")).digest()
+    number = int.from_bytes(digest[:4], "big") % 1000
+    start = number
+    while number in used:
+        number = (number + 1) % 1000
+        if number == start:
+            raise RuntimeError("no free 3-digit channel number")
+    return number
+
+
+def format_channel_number(number: int) -> str:
+    """Render a channel as digits. 0–999 are always 3 wide (007, 100, 042)."""
+    n = int(number)
+    if abs(n) > 999:
+        return str(n)
+    return f"{abs(n):03d}"
+
+
+def assign_display_numbers(rows: list[tuple[bool, int, str]]) -> list[int]:
+    """Keep explicit numbers; give every other row a stable 3-digit number.
+
+    *rows* are ``(explicit, preferred, name)``. Names are assigned in alphabetical
+    order so the result does not depend on genre-slot ids.
+    """
+    used: set[int] = set()
+    assigned: dict[int, int] = {}
+    for index, (explicit, preferred, _name) in enumerate(rows):
+        if explicit and int(preferred) not in used:
+            assigned[index] = int(preferred)
+            used.add(int(preferred))
+    pending = [index for index in range(len(rows)) if index not in assigned]
+    pending.sort(key=lambda index: natural_key(rows[index][2]))
+    for index in pending:
+        number = stable_channel_number(rows[index][2].casefold(), used)
+        assigned[index] = number
+        used.add(number)
+    return [assigned[index] for index in range(len(rows))]
 
 
 def assign_channel_numbers(
     parsed: list[tuple[int | None, str, Path]],
 ) -> list[tuple[int, str, Path]]:
-    """Keep explicit ``NNN_`` numbers; auto-number the rest after sorting by name."""
+    """Keep explicit ``NNN_`` numbers; give the rest a stable 3-digit number."""
     used = {number for number, _, _ in parsed if number is not None}
     numbered = [(number, name, path) for number, name, path in parsed if number is not None]
     unnumbered = sorted(
@@ -126,7 +166,7 @@ def assign_channel_numbers(
     )
     assigned: list[tuple[int, str, Path]] = list(numbered)
     for name, path in unnumbered:
-        number = _next_free_number(used)
+        number = stable_channel_number(str(path), used)
         used.add(number)
         assigned.append((number, name, path))
     assigned.sort(key=lambda item: (item[0], natural_key(item[1])))
@@ -301,6 +341,7 @@ def scan_media_root(
             rends = rendition_map.get(str(item.path.resolve())) or []
             item.renditions = [r.to_dict() for r in rends]
         playlist = find_playlist(folder)
+        explicit_number, _explicit_name = parse_channel_folder_name(folder.name)
         channels.append(
             Channel(
                 number=number,
@@ -309,6 +350,7 @@ def scan_media_root(
                 media=media,
                 schedule_mode=mode,
                 playlist=playlist,
+                number_explicit=explicit_number is not None,
             )
         )
 
@@ -326,23 +368,33 @@ def scan_media_root(
 
 
 def merge_channels(*groups: list[Channel]) -> list[Channel]:
-    """Combine scans from several roots, keeping unique channel numbers."""
-    used: set[int] = set()
-    out: list[Channel] = []
-    overflow: list[Channel] = []
+    """Combine scans. Explicit numbers win; collisions get a free 3-digit number."""
+    explicit: list[Channel] = []
+    auto: list[Channel] = []
     for group in groups:
         for channel in group:
-            if channel.number in used:
-                overflow.append(channel)
+            if channel.number_explicit:
+                explicit.append(channel)
             else:
-                used.add(channel.number)
-                out.append(channel)
-    for channel in overflow:
-        number = 1
-        while number in used:
-            number += 1
-        channel.number = number
-        used.add(number)
+                auto.append(channel)
+    used: set[int] = set()
+    out: list[Channel] = []
+    for channel in explicit:
+        if channel.number in used:
+            channel.number = stable_channel_number(
+                f"{channel.folder_path}|{channel.name}|explicit",
+                used,
+            )
+            channel.number_explicit = False
+        used.add(channel.number)
+        out.append(channel)
+    for channel in auto:
+        if channel.number in used:
+            channel.number = stable_channel_number(
+                f"{channel.folder_path}|{channel.name}",
+                used,
+            )
+        used.add(channel.number)
         out.append(channel)
     out.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
     return out
@@ -367,10 +419,6 @@ def pad_channels(channels: list[Channel], minimum: int) -> list[Channel]:
     while len(out) < int(minimum):
         src = channels[index % len(channels)]
         copies[src.number] = copies.get(src.number, 1) + 1
-        number = 1
-        while number in used:
-            number += 1
-        used.add(number)
         suffix = copies[src.number]
         name = None
         while spare_i < len(spare):
@@ -382,11 +430,14 @@ def pad_channels(channels: list[Channel], minimum: int) -> list[Channel]:
         if not name:
             name = src.name if suffix <= 1 else f"{src.name} {suffix}"
         used_names.add(name.strip().lower())
+        number = stable_channel_number(name.casefold(), used)
+        used.add(number)
         out.append(
             replace(
                 src,
                 number=number,
                 name=name,
+                number_explicit=False,
                 media=list(src.media),
                 playlist=list(src.playlist) if src.playlist else None,
             )

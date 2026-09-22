@@ -332,6 +332,7 @@ def scan_tv_root(
                 pretty = f"S{season:02d}E{episode:02d}"
                 if pretty.lower() not in item.title.lower():
                     item.title = f"{pretty} · {item.title}"
+        explicit_number, _explicit_name = parse_channel_folder_name(folder.name)
         channels.append(
             Channel(
                 number=number,
@@ -339,6 +340,7 @@ def scan_tv_root(
                 folder_path=folder.resolve(),
                 media=media,
                 schedule_mode=mode,
+                number_explicit=explicit_number is not None,
             )
         )
     if dirty and cache_file is not None:
@@ -415,6 +417,7 @@ def scan_movies_root(
     if dirty and cache_file is not None:
         _save_probe_cache(cache_file, cache)
     number, name = parse_channel_folder_name(root.name)
+    explicit = number is not None
     if number is None:
         name = name or "Movies"
     assigned = assign_channel_numbers([(number, name, root)])
@@ -426,6 +429,7 @@ def scan_movies_root(
             folder_path=folder.resolve(),
             media=media,
             schedule_mode=mode,
+            number_explicit=explicit,
         )
     ]
 
@@ -443,6 +447,98 @@ def _prefix_series_titles(channel: Channel) -> None:
             item.title = f"{prefix} · {item.title}"
 
 
+def _collect_videos(folder: Path) -> list[Path]:
+    """Every video under *folder*, skipping extras/trailers and dot dirs."""
+    videos: list[Path] = []
+    stack = [folder]
+    while stack:
+        current = stack.pop()
+        try:
+            children = list(current.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.name.startswith(".") or _skip_dir(child.name):
+                continue
+            if child.is_dir():
+                stack.append(child)
+            elif is_video_file(child):
+                videos.append(child)
+    videos.sort(key=lambda path: natural_key(str(path)))
+    return videos
+
+
+def scan_music_video_root(
+    root: Path | str,
+    *,
+    default_mode: str = "sequential",
+    probe_runner: Callable[..., Any] | None = None,
+    cache_dir: Path | str | None = None,
+    probe_fn: Callable[..., MediaFile | None] | None = None,
+) -> list[Channel]:
+    """Each immediate subfolder of a music-video library is a named channel.
+
+    Videos nested further down (artist / album) stay on that channel. Loose
+    files in the library root become one Music Videos channel. ``NNN_Name``
+    folders keep their number; everything else gets a stable 3-digit number.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    mode: ScheduleMode = "random" if str(default_mode).lower() == "random" else "sequential"
+    cache_file = Path(cache_dir) / "probe.json" if cache_dir is not None else None
+    cache: dict[str, Any] = _load_probe_cache(cache_file) if cache_file else {}
+    try:
+        children = list(root.iterdir())
+    except OSError as exc:
+        log.warning("cannot list music video root %s: %s", root, exc)
+        return []
+    parsed: list[tuple[int | None, str, Path]] = []
+    files_for: dict[Path, list[Path]] = {}
+    for child in children:
+        if child.name.startswith(".") or _skip_dir(child.name):
+            continue
+        if not child.is_dir():
+            continue
+        number, name = parse_channel_folder_name(child.name)
+        parsed.append((number, name, child))
+        files_for[child] = _collect_videos(child)
+    loose = [child for child in children if is_video_file(child)]
+    if loose:
+        parsed.append((None, "Music Videos", root))
+        files_for[root] = sorted(loose, key=lambda path: natural_key(path.name))
+    if not parsed:
+        return []
+    from localcable.transcode import collapse_rendition_files
+
+    channels: list[Channel] = []
+    dirty = False
+    for number, name, folder in assign_channel_numbers(parsed):
+        grouped = collapse_rendition_files(files_for.get(folder, []))
+        files = [primary for primary, _rends in grouped]
+        rendition_map = {str(primary.resolve()): rends for primary, rends in grouped}
+        media, d = _probe_many(files, probe_runner=probe_runner, probe_fn=probe_fn, cache=cache)
+        dirty = dirty or d
+        for item in media:
+            rends = rendition_map.get(str(item.path.resolve())) or []
+            item.renditions = [r.to_dict() for r in rends]
+        explicit_number, _explicit_name = parse_channel_folder_name(folder.name)
+        channels.append(
+            Channel(
+                number=number,
+                name=name,
+                folder_path=folder.resolve(),
+                media=media,
+                schedule_mode=mode,
+                number_explicit=explicit_number is not None and folder != root,
+            )
+        )
+    if dirty and cache_file is not None:
+        _save_probe_cache(cache_file, cache)
+    channels.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
+    return channels
+
+
 def scan_auto_root(
     root: Path | str,
     *,
@@ -453,15 +549,25 @@ def scan_auto_root(
     fetch_metadata: bool = False,
     opener: Callable[..., Any] | None = None,
     lineup_config: Any = None,
+    custom_channels: Path | str | None = None,
+    music_videos: Path | str | None = None,
 ) -> list[Channel]:
-    """Scan a top-level library (Movies/ + Shows/) into genre cable channels."""
+    """Scan a top-level library (Movies/ + Shows/) into genre cable channels.
+
+    Sibling ``custom_channel`` folders use the legacy folder-per-channel layout
+    and are added beside the genre lineup. Sibling ``music_video`` folders become
+    one named channel per subfolder.
+    """
     from localcable.lineup import (
+        CUSTOM_CHANNEL_ALIASES,
+        MUSIC_VIDEO_ALIASES,
         enrich_genres,
         find_movie_dir,
         find_tv_dir,
         lineup_channels,
         looks_like_movie_library,
         looks_like_tv_library,
+        resolve_extra_dir,
     )
 
     root = Path(root)
@@ -485,12 +591,22 @@ def scan_auto_root(
     if movie_dir is not None:
         for channel in scan_movies_root(movie_dir, **kwargs):
             items.extend(channel.media)
-    if not items:
+    genre: list[Channel] = []
+    if items:
+        enrich_genres(items, fetch=fetch_metadata, opener=opener)
+        genre = lineup_channels(
+            items, root, default_mode=default_mode, lineup_config=lineup_config
+        )
+    groups: list[list[Channel]] = [genre]
+    custom_dir = resolve_extra_dir(root, custom_channels, CUSTOM_CHANNEL_ALIASES)
+    if custom_dir is not None:
+        groups.append(scan_media_root(custom_dir, **kwargs))
+    music_dir = resolve_extra_dir(root, music_videos, MUSIC_VIDEO_ALIASES)
+    if music_dir is not None:
+        groups.append(scan_music_video_root(music_dir, **kwargs))
+    if not any(groups):
         return []
-    enrich_genres(items, fetch=fetch_metadata, opener=opener)
-    return lineup_channels(
-        items, root, default_mode=default_mode, lineup_config=lineup_config
-    )
+    return merge_channels(*groups)
 
 
 def scan_libraries(
@@ -524,11 +640,16 @@ def scan_libraries(
     for lib in libraries:
         path = Path(getattr(lib, "path"))
         kind = str(getattr(lib, "kind", "channels") or "channels").lower()
+        lib_auto = {
+            **auto_kwargs,
+            "custom_channels": getattr(lib, "custom_channels", None),
+            "music_videos": getattr(lib, "music_videos", None),
+        }
         if kind in {"auto", "lineup", "cable"}:
-            groups.append(scan_auto_root(path, **auto_kwargs))
+            groups.append(scan_auto_root(path, **lib_auto))
             continue
         if kind == "jellyfin":
-            groups.append(scan_auto_root(path, **auto_kwargs))
+            groups.append(scan_auto_root(path, **lib_auto))
             continue
         if kind == "tv":
             groups.append(scan_tv_root(path, **kwargs))
@@ -538,7 +659,7 @@ def scan_libraries(
             continue
         detected = detect_library_kind(path) if auto_channels else "channels"
         if detected == "auto":
-            groups.append(scan_auto_root(path, **auto_kwargs))
+            groups.append(scan_auto_root(path, **lib_auto))
         elif detected == "tv":
             groups.append(scan_tv_root(path, **kwargs))
         elif detected == "movies":

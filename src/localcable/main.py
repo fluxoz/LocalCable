@@ -6,6 +6,9 @@ import argparse
 import logging
 import sys
 import threading
+import time
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -204,6 +207,20 @@ def transcode_main(argv: list[str]) -> int:
     return 1 if result.failed else 0
 
 
+def open_browser_when_listening(url: str) -> None:
+    """Open the guide once the server accepts connections, before the scan finishes."""
+    health = url.rstrip("/") + "/health"
+    for _ in range(200):
+        try:
+            with urllib.request.urlopen(health, timeout=0.4) as response:
+                if getattr(response, "status", 200) < 500:
+                    webbrowser.open(url)
+                    return
+        except (urllib.error.URLError, TimeoutError, OSError):
+            time.sleep(0.15)
+    webbrowser.open(url)
+
+
 def public_url(host: str, port: int) -> str:
     shown = "127.0.0.1" if host in {"0.0.0.0", "::", "[::]"} else host
     return f"http://{shown}:{port}/"
@@ -249,7 +266,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Mode:   {config.schedule.default_mode}  ({'headed' if config.ui.auto_open_browser else 'headless'})")
 
     if config.ui.auto_open_browser:
-        threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+        threading.Thread(
+            target=open_browser_when_listening,
+            args=(url,),
+            name="localcable-browser",
+            daemon=True,
+        ).start()
 
     try:
         uvicorn.run(app, host=host, port=port, log_level="info")

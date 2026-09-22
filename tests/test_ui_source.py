@@ -39,6 +39,9 @@ def test_html_has_guide_landmarks():
         'id="transcode-library-bar"',
         'id="transcode-file-bar"',
         'id="transcode-files"',
+        'id="splash"',
+        'id="splash-fill"',
+        "/static/splash.jpg",
         "TV Listings",
         "/static/vendor/dash.all.min.js",
     ):
@@ -72,6 +75,10 @@ def test_css_has_layout_hooks():
         ".program-title",
         ".program-episode",
         ".ch-num",
+        "text-align: center",
+        "text-transform: uppercase",
+        "#splash",
+        "#splash-fill",
         ".crt-vhs",
         "#player",
         "body.watching",
@@ -117,6 +124,7 @@ def test_js_is_browser_script_without_node_modules():
     assert "surfChannel" in js
     play_fn = js.split("function playProgram", 1)[1].split("function tick", 1)[0]
     assert "rememberProgram" in play_fn
+    assert "state.ignoreEnded = false" in play_fn
     start_fn = js.split("function startDash", 1)[1].split("function restartFromBeginning", 1)[0]
     assert "streamSeq" in start_fn
     assert "selectedId" in start_fn
@@ -138,6 +146,10 @@ def test_js_is_browser_script_without_node_modules():
     assert "transcode-library-bar" in js
     assert "nextProgram" in js
     assert "onVideoEnded" in js
+    assert "formatChannelNumber" in js
+    assert "formatChannelName" in js
+    assert "/api/boot" in js
+    assert "pollBoot" in js
     assert 'addEventListener("ended"' in js
     ended_fn = js.split("function onVideoEnded", 1)[1].split("function showArt", 1)[0]
     assert "state.watching" in ended_fn
@@ -171,6 +183,9 @@ def test_mpv_esc_script_only_runs_helper():
     assert "localcable-info" in lua
     assert "CHANNEL_UP" in lua
     assert "channel-up" in lua
+    assert "end-file" in lua
+    assert 'remote("next")' in lua
+    assert "eof" in lua
     assert "/api/show-guide" in helper
     assert "play_file" not in helper
     assert "fullscreen" not in helper

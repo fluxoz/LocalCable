@@ -9,7 +9,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from localcable.app import AppState, create_app
-from localcable.remote import match_channel_number, normalize_action, step_channel
+from localcable.remote import match_channel_number, max_channel_digits, normalize_action, step_channel
+from localcable.scan import format_channel_number
 from tests.test_api import _config, _fake_player
 
 
@@ -20,6 +21,12 @@ def test_match_channel_number_exact_prefix_closest():
     assert match_channel_number(numbers, "3") == 310
     assert match_channel_number(numbers, "1") == 1
     assert match_channel_number(numbers, "9") == 1
+    assert match_channel_number([7, 101], "007") == 7
+    assert match_channel_number([7, 101], "00") == 7
+    assert format_channel_number(7) == "007"
+    assert format_channel_number(100) == "100"
+    assert format_channel_number(101) == "101"
+    assert max_channel_digits([7]) == 3
 
 
 def test_step_channel_wraps():
@@ -37,6 +44,7 @@ def test_normalize_action_keys_and_digits():
     assert normalize_action(key="5") == ("digit", "5")
     assert normalize_action("ch+") == ("channel-up", None)
     assert normalize_action("digit", digit="7") == ("digit", "7")
+    assert normalize_action("next") == ("next", None)
 
 
 def test_remote_channel_up_plays_next_channel(

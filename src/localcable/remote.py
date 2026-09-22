@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from localcable.models import ChannelSchedule, ScheduledProgram
+from localcable.scan import format_channel_number
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ ACTIONS = frozenset(
         "digit",
         "tune",
         "select",
+        "next",
     }
 )
 
@@ -115,15 +117,24 @@ def normalize_action(
 
 
 def match_channel_number(numbers: list[int], buf: str) -> int | None:
-    """Resolve a typed channel buffer the way a cable box does."""
+    """Resolve a typed channel buffer the way a cable box does.
+
+    Channels display as 3 digits, so ``007`` matches 7 and ``00`` prefixes 000–009.
+    An exact integer still wins (``1`` tunes channel 1 when that channel exists).
+    """
     if not buf or not buf.isdigit() or not numbers:
         return None
     typed = int(buf)
     if typed in numbers:
         return typed
-    prefixes = [n for n in numbers if str(n).startswith(buf)]
-    if len(prefixes) == 1:
-        return prefixes[0]
+    labels = [(format_channel_number(n), n) for n in numbers]
+    exact = [n for label, n in labels if label == buf]
+    if len(exact) == 1:
+        return exact[0]
+    prefixes = [n for label, n in labels if label.startswith(buf) or str(n).startswith(buf)]
+    unique = list(dict.fromkeys(prefixes))
+    if len(unique) == 1:
+        return unique[0]
     return min(numbers, key=lambda n: (abs(n - typed), n))
 
 
@@ -147,9 +158,10 @@ def program_airing_on(channel: ChannelSchedule, now: datetime) -> ScheduledProgr
 
 
 def max_channel_digits(numbers: list[int]) -> int:
+    """Digit entry is at least 3 wide so 007 can be typed before it commits."""
     if not numbers:
-        return 1
-    return max(len(str(n)) for n in numbers)
+        return 3
+    return max(3, *(len(format_channel_number(n)) for n in numbers))
 
 
 def start_evdev_listener(

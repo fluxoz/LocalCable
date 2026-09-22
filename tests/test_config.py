@@ -87,6 +87,28 @@ def test_libraries_and_browser_player_from_yaml(tmp_path: Path):
     assert config.media_roots == [tmp_path / "Shows", tmp_path / "Movies"]
 
 
+def test_library_extra_folders_from_yaml(tmp_path: Path):
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        "\n".join(
+            [
+                "libraries:",
+                f"  - path: {tmp_path / 'Videos'}",
+                "    kind: jellyfin",
+                f"    custom_channels: {tmp_path / 'custom_channel'}",
+                "    music_videos: music_video",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(settings)
+    lib = config.libraries[0]
+    assert lib.kind == "jellyfin"
+    assert lib.custom_channels == tmp_path / "custom_channel"
+    assert lib.music_videos == Path("music_video")
+
+
 def test_lineup_names_from_yaml(tmp_path: Path):
     settings = tmp_path / "settings.yaml"
     settings.write_text(

@@ -217,6 +217,18 @@ local function remote(action, extra)
     end
 end
 
+mp.register_event("end-file", function(event)
+    local reason = ""
+    if type(event) == "table" then
+        reason = tostring(event.reason or "")
+    end
+    -- "stop" is a channel change (loadfile replace). Only a real end should advance.
+    -- Browser and "both" advance from the page so this does not skip a title.
+    if reason == "eof" and (os.getenv("LOCALCABLE_PLAYER") or "") == "mpv" then
+        remote("next")
+    end
+end)
+
 local function bind_many(keys, name, fn)
     for i = 1, #keys do
         mp.add_forced_key_binding(keys[i], name .. "-" .. keys[i], fn)

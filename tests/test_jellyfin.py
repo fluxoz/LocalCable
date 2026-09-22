@@ -128,6 +128,60 @@ def test_scan_libraries_merges_kinds(tmp_path: Path):
     assert len(set(numbers)) == len(numbers)
 
 
+def test_jellyfin_parent_adds_custom_and_music_channels(tmp_path: Path):
+    movies = tmp_path / "Movies"
+    heat = _touch_video(movies / "Heat (1995)" / "Heat (1995).mkv")
+    (heat.parent / "movie.nfo").write_text("<movie><genre>Action</genre></movie>\n", encoding="utf-8")
+    custom = tmp_path / "custom_channel"
+    _touch_video(custom / "101_CNN" / "evening.mkv")
+    _touch_video(custom / "Local News" / "bulletin.mkv")
+    music = tmp_path / "music_video"
+    _touch_video(music / "90s Hits" / "track.mp4")
+    _touch_video(music / "90s Hits" / "Artist" / "another.mp4")
+    _touch_video(music / "loose.mp4")
+    channels = scan_libraries(
+        [LibraryRoot(path=tmp_path, kind="auto")],
+        probe_fn=_probe,
+        fetch_metadata=False,
+    )
+    by_name = {ch.name: ch for ch in channels}
+    assert "Thunderbolt" in by_name
+    assert by_name["CNN"].number == 101
+    assert by_name["CNN"].number_explicit is True
+    assert "Local News" in by_name
+    assert 0 <= by_name["Local News"].number <= 999
+    assert len(by_name["90s Hits"].media) == 2
+    assert len(by_name["Music Videos"].media) == 1
+    numbers = [ch.number for ch in channels]
+    assert len(set(numbers)) == len(numbers)
+
+
+def test_explicit_custom_and_music_paths(tmp_path: Path):
+    movie = _touch_video(tmp_path / "Movies" / "Up (2009)" / "Up (2009).mkv")
+    (movie.parent / "movie.nfo").write_text(
+        "<movie><genre>Animation</genre></movie>\n",
+        encoding="utf-8",
+    )
+    special = tmp_path / "special"
+    _touch_video(special / "Station" / "a.mkv")
+    clips = tmp_path / "clips"
+    _touch_video(clips / "Beyonce" / "video.mp4")
+    channels = scan_libraries(
+        [
+            LibraryRoot(
+                path=tmp_path,
+                kind="auto",
+                custom_channels=special,
+                music_videos=clips,
+            )
+        ],
+        probe_fn=_probe,
+        fetch_metadata=False,
+    )
+    names = {ch.name for ch in channels}
+    assert {"Toonbox", "Station", "Beyonce"} <= names
+
+
 def test_merge_channels_rewrites_collisions():
     a = Channel(number=1, name="A", folder_path=Path("/a"))
     b = Channel(number=1, name="B", folder_path=Path("/b"))

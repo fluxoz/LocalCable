@@ -393,7 +393,7 @@ html, body {
   height: var(--row-h);
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   gap: 1px;
   padding: 4px 10px;
@@ -401,6 +401,7 @@ html, body {
   background: var(--channel-bg);
   font-weight: 700;
   overflow: hidden;
+  text-align: center;
 }
 
 .channel-cell:nth-child(even) { background: var(--channel-bg-alt); }
@@ -416,6 +417,8 @@ html, body {
   font-weight: 800;
   line-height: 1.1;
   min-width: 0;
+  width: 100%;
+  text-align: center;
 }
 
 .ch-name {
@@ -426,8 +429,56 @@ html, body {
   text-overflow: ellipsis;
   white-space: nowrap;
   width: 100%;
-  text-align: left;
+  text-align: center;
+  text-transform: uppercase;
   opacity: 0.92;
+}
+
+#splash {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  background: #041428;
+}
+
+#splash[hidden] {
+  display: none;
+}
+
+#splash img {
+  width: min(920px, 92vw);
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.splash-track {
+  width: min(480px, 80vw);
+  height: 14px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+}
+
+#splash-fill {
+  height: 100%;
+  width: 0%;
+  background: #f5c518;
+  transition: width 0.35s linear;
+}
+
+#splash-status {
+  margin: 0;
+  color: #e8f3ff;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 #program-grid {

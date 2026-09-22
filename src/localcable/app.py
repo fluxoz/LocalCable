@@ -165,6 +165,15 @@ class AppState:
         self._remote_stop: threading.Event | None = None
         self._lock = threading.RLock()
         self.transcode = TranscodeManager()
+        self._boot_done = threading.Event()
+        self._boot_started = False
+        self._boot_thread_id: int | None = None
+        self._boot_phase = "starting"
+        self._boot_message = "Starting LocalCable…"
+        self._boot_progress = 0.02
+        extra_env = getattr(self.player, "extra_env", None)
+        if isinstance(extra_env, dict):
+            extra_env["LOCALCABLE_PLAYER"] = str(config.playback.player)
 
     def _path_key(self, path: Path | str) -> str:
         src = Path(path)
@@ -210,7 +219,48 @@ class AppState:
         except OSError as exc:
             log.warning("cannot create config dir %s: %s", self.config.config_dir, exc)
 
+    def start_boot(self) -> None:
+        """Scan the library on a background thread so the guide can show a splash."""
+        if self._boot_started:
+            return
+        self._boot_started = True
+        self._boot_phase = "scanning"
+        self._boot_message = "Scanning media…"
+        self._boot_progress = 0.12
+
+        def _run() -> None:
+            self._boot_thread_id = threading.get_ident()
+            try:
+                self.refresh(force=True)
+                self._boot_phase = "ready"
+                self._boot_message = "Ready"
+                self._boot_progress = 1.0
+            except Exception as exc:  # noqa: BLE001
+                log.exception("startup scan failed")
+                self._boot_phase = "error"
+                self._boot_message = str(exc) or "Scan failed"
+                self._boot_progress = 1.0
+            finally:
+                self._boot_done.set()
+
+        threading.Thread(target=_run, name="localcable-boot", daemon=True).start()
+
+    def boot_status(self) -> dict[str, Any]:
+        return {
+            "ok": self._boot_phase != "error",
+            "phase": self._boot_phase,
+            "progress": float(self._boot_progress),
+            "message": self._boot_message,
+            "ready": self._boot_phase == "ready",
+        }
+
     def refresh(self, force: bool = False) -> GuideSchedule:
+        if (
+            self._boot_started
+            and not self._boot_done.is_set()
+            and threading.get_ident() != self._boot_thread_id
+        ):
+            self._boot_done.wait()
         with self._lock:
             now = self.now_fn()
             if (
@@ -324,6 +374,54 @@ class AppState:
                     self.selected_program_id = self.now_playing.id
                     self.selected_channel = self.now_playing.channel_number
         return result
+
+    def next_airing(self, program: ScheduledProgram) -> ScheduledProgram | None:
+        """Next title on the same channel, wrapping to the earliest when the window ends."""
+        with self._lock:
+            if self.schedule is None:
+                return None
+            channel = None
+            for candidate in self.schedule.channels:
+                if candidate.number == program.channel_number:
+                    channel = candidate
+                    break
+            if channel is None or not channel.programs:
+                return None
+            best: ScheduledProgram | None = None
+            for item in channel.programs:
+                if item.id == program.id:
+                    continue
+                if item.start_time >= program.end_time and (
+                    best is None or item.start_time < best.start_time
+                ):
+                    best = item
+            if best is not None:
+                return best
+            others = [item for item in channel.programs if item.id != program.id]
+            if not others:
+                return None
+            return min(others, key=lambda item: (item.start_time, item.id))
+
+    def play_next(self) -> dict[str, Any]:
+        """Start the next title on the channel that is playing, from 0:00."""
+        with self._lock:
+            current = self.now_playing
+            if current is None and self.selected_program_id:
+                current = self.programs_by_id.get(self.selected_program_id)
+        if current is None:
+            return {"ok": False, "played": False, "error": "nothing playing"}
+        nxt = self.next_airing(current)
+        if nxt is None:
+            return {"ok": False, "played": False, "error": "no next program"}
+        result = self.play(program_id=nxt.id, from_start=True)
+        return {
+            "ok": True,
+            "played": True,
+            "program_id": nxt.id,
+            "title": nxt.title,
+            "channel": nxt.channel_number,
+            **result.to_dict(),
+        }
 
     def stream(
         self,
@@ -616,6 +714,9 @@ class AppState:
             if nxt is None:
                 return {"ok": False, "action": name, "error": "no channels"}
             return {"action": name, **self.play_channel(nxt)}
+        if name == "next":
+            result = self.play_next()
+            return {"action": "next", **result}
         if name in {"ok", "play"}:
             pid = program_id or self.selected_program_id
             if pid:
@@ -697,7 +798,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         bundle.ensure_writable_config_dir()
-        bundle.refresh(force=True)
+        bundle.start_boot()
         bundle.start_remote_listener()
         try:
             yield
@@ -713,6 +814,10 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {"status": "ok", "version": __version__}
+
+    @app.get("/api/boot")
+    def api_boot() -> JSONResponse:
+        return JSONResponse(bundle.boot_status(), headers={"Cache-Control": "no-store"})
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:

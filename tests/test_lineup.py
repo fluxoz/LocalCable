@@ -18,6 +18,7 @@ from localcable.lineup import (
     mix_playlist,
     pick_slot,
 )
+from localcable.scan import assign_display_numbers
 from localcable.util import live_offset_seconds
 from localcable.models import MediaFile
 
@@ -124,7 +125,10 @@ def test_auto_lineup_mixes_tv_and_movies_by_genre(tmp_path: Path):
     by_name = {ch.name: ch for ch in channels}
     assert "Thunderbolt" in by_name
     assert "Chuckle" in by_name
-    assert by_name["Thunderbolt"].number == 13
+    display = assign_display_numbers([(False, 6, "Chuckle"), (False, 13, "Thunderbolt")])
+    assert by_name["Chuckle"].number == display[0]
+    assert by_name["Thunderbolt"].number == display[1]
+    assert 0 <= by_name["Thunderbolt"].number <= 999
     assert any("Heat" in m.title for m in by_name["Thunderbolt"].media)
     chuckle_titles = " ".join(m.title for m in by_name["Chuckle"].media)
     assert "Office" in chuckle_titles
