@@ -20,6 +20,7 @@ from localcable.config import (
     UiConfig,
 )
 from localcable.player import MpvController
+from localcable.scan import format_channel_number
 from tests.helpers import make_video
 
 
@@ -96,6 +97,34 @@ def test_schedule_api_lists_fixture_channels(
                 if start <= now < end:
                     spanned = True
         assert spanned, "no program airing at frozen now"
+        boot = client.get("/api/boot")
+        assert boot.status_code == 200
+        assert boot.json()["ready"] is True
+        assert boot.json()["phase"] == "ready"
+        page = client.get("/")
+        assert page.status_code == 200
+        assert 'id="splash"' in page.text
+        assert "/static/splash.jpg" in page.text
+        assert 'id="splash-fill"' in page.text
+
+
+def test_play_next_starts_following_title(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    config = _config(tmp_path, media_root)
+    player, recorded = _fake_player(tmp_path)
+    state = AppState(config, now_fn=lambda: frozen_now, player=player, rng=random.Random(0))
+    state.refresh(force=True)
+    cnn = next(ch for ch in state.schedule.channels if ch.name == "CNN")
+    assert len(cnn.programs) >= 2
+    state.now_playing = cnn.programs[0]
+    result = state.handle_remote("next")
+    assert result["ok"] is True
+    assert result["played"] is True
+    assert result["program_id"] != cnn.programs[0].id
+    assert state.now_playing is not None
+    assert state.now_playing.id == result["program_id"]
+    assert recorded
 
 
 def test_index_and_logo(tmp_path: Path, media_root: Path, frozen_now: datetime):
@@ -182,7 +211,8 @@ def test_play_endpoint_invokes_mpv_on_fixture_path(
         assert ["seek", 0, "absolute"] in payload["ipc_commands"]
         osd = json.loads((config.config_dir / "osd.json").read_text(encoding="utf-8"))
         assert osd["title"] == program["title"]
-        assert str(osd["channel_number"]) == str(program["channel_number"])
+        assert osd["channel_number"] == format_channel_number(program["channel_number"])
+        assert osd["channel_name"] == str(program["channel_name"]).upper()
 
 
 def test_empty_channel_folder_listed_without_programs(

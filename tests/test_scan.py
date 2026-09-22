@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from localcable.models import Channel
-from localcable.scan import pad_channels, parse_channel_folder_name, scan_media_root
+from localcable.scan import (
+    format_channel_number,
+    pad_channels,
+    parse_channel_folder_name,
+    scan_media_root,
+    stable_channel_number,
+)
 
 
 def test_parse_numbered_prefix():
@@ -24,11 +30,19 @@ def test_scan_numbered_and_unnumbered(media_root: Path):
     assert by_name["CNN"].number == 101
     assert by_name["ALT"].number == 205
     assert by_name["HIST"].number == 310
-    # Unnumbered folders are sorted by name, then given unused numbers from 1.
-    assert by_name["Discovery"].number == 1
-    assert by_name["HBO"].number == 2
+    used = {101, 205, 310}
+    discovery = stable_channel_number(str(media_root / "Discovery"), used)
+    used.add(discovery)
+    hbo = stable_channel_number(str(media_root / "HBO"), used)
+    assert by_name["Discovery"].number == discovery
+    assert by_name["HBO"].number == hbo
+    assert by_name["Discovery"].number_explicit is False
+    assert by_name["CNN"].number_explicit is True
+    assert format_channel_number(discovery) == f"{discovery:03d}"
+    assert scan_media_root(media_root)[0].number == channels[0].number
     numbers = [ch.number for ch in channels]
     assert numbers == sorted(numbers)
+    assert len(set(numbers)) == len(numbers)
 
 
 def test_scan_uses_ffprobe_durations(media_root: Path):
@@ -70,9 +84,10 @@ def test_empty_folder_is_still_a_channel(tmp_path: Path):
     assert by_name["CNN"].media == []
     assert by_name["HBO"].number == 205
     assert by_name["HBO"].media == []
-    assert by_name["Weather"].number == 1
+    weather = stable_channel_number(str(root / "Weather"), {101, 205})
+    assert by_name["Weather"].number == weather
     assert by_name["Weather"].media == []
-    assert [ch.number for ch in channels] == [1, 101, 205]
+    assert [ch.number for ch in channels] == sorted(ch.number for ch in channels)
 
 
 def test_pad_channels_repeats_until_minimum():

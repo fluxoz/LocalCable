@@ -115,6 +115,27 @@
     return n < 10 ? "0" + n : String(n);
   }
 
+  function formatChannelNumber(number) {
+    var n = parseInt(number, 10);
+    if (isNaN(n)) return "";
+    n = Math.abs(n);
+    if (n > 999) return String(n);
+    var s = String(n);
+    while (s.length < 3) s = "0" + s;
+    return s;
+  }
+
+  function formatChannelName(name) {
+    return String(name || "").toUpperCase();
+  }
+
+  function formatChannelLabel(number, name) {
+    var num = number != null && number !== "" ? formatChannelNumber(number) : "";
+    var label = formatChannelName(name);
+    if (num && label) return num + " " + label;
+    return num || label;
+  }
+
   function formatClock(date) {
     var h = date.getHours();
     var m = date.getMinutes();
@@ -774,8 +795,9 @@
     if (isNaN(typed)) return null;
     var prefixes = [];
     for (var i = 0; i < channels.length; i += 1) {
-      if (channels[i].number === typed) return channels[i];
-      if (String(channels[i].number).indexOf(buf) === 0) prefixes.push(channels[i]);
+      var label = formatChannelNumber(channels[i].number);
+      if (channels[i].number === typed || label === buf) return channels[i];
+      if (label.indexOf(buf) === 0 || String(channels[i].number).indexOf(buf) === 0) prefixes.push(channels[i]);
     }
     if (prefixes.length === 1) return prefixes[0];
     var closest = channels[0];
@@ -792,9 +814,9 @@
 
   function maxChannelDigits() {
     var channels = (state.schedule && state.schedule.channels) || [];
-    var width = 1;
+    var width = 3;
     for (var i = 0; i < channels.length; i += 1) {
-      var n = String(channels[i].number).length;
+      var n = formatChannelNumber(channels[i].number).length;
       if (n > width) width = n;
     }
     return width;
@@ -851,14 +873,14 @@
     var time = $("detail-time");
     var desc = $("detail-description");
     var play = $("play-button");
-    if (title) title.textContent = channel.name || "No programming";
-    if (chEl) chEl.textContent = channel.number != null ? channel.number + " " + (channel.name || "") : channel.name || "";
+    if (title) title.textContent = formatChannelName(channel.name) || "No programming";
+    if (chEl) chEl.textContent = formatChannelLabel(channel.number, channel.name || "");
     if (rating) rating.textContent = "";
     if (time) time.textContent = "";
     if (desc) desc.textContent = "No programming";
     if (play) play.disabled = true;
     var status = $("footer-status");
-    if (status) status.textContent = "Channel " + channel.number;
+    if (status) status.textContent = "Channel " + formatChannelNumber(channel.number);
     showArt(channel.number != null ? "/art/channel/" + channel.number : "");
     cancelPreview();
     if (typeof fetch === "function") {
@@ -951,10 +973,10 @@
       cell.setAttribute("data-channel", String(channel.number));
       var num = document.createElement("span");
       num.className = "ch-num";
-      num.textContent = String(channel.number);
+      num.textContent = formatChannelNumber(channel.number);
       var name = document.createElement("span");
       name.className = "ch-name";
-      name.textContent = channel.name;
+      name.textContent = formatChannelName(channel.name);
       cell.appendChild(num);
       cell.appendChild(name);
       col.appendChild(cell);
@@ -1100,9 +1122,7 @@
     var play = $("play-button");
     if (title) title.textContent = program.title || "";
     if (channel) {
-      var chName = program.channel_name || "";
-      var chNum = program.channel_number;
-      channel.textContent = chNum != null ? chNum + " " + chName : chName;
+      channel.textContent = formatChannelLabel(program.channel_number, program.channel_name || "");
     }
     if (rating) rating.textContent = program.rating || "No rating";
     if (time) time.textContent = formatRange(program.start_time, program.end_time);
@@ -1164,6 +1184,8 @@
     var end = parseTime(program.end_time);
     var best = null;
     var bestStart = Infinity;
+    var wrap = null;
+    var wrapStart = Infinity;
     for (var i = 0; i < programs.length; i += 1) {
       if (programs[i].id === program.id) continue;
       var start = parseTime(programs[i].start_time);
@@ -1171,15 +1193,22 @@
         best = programs[i];
         bestStart = start;
       }
+      if (start < wrapStart) {
+        wrap = programs[i];
+        wrapStart = start;
+      }
     }
-    return best;
+    return best || wrap;
   }
 
   function onVideoEnded() {
     if (!state.watching) return;
     if (state.ignoreEnded) return;
     var next = nextProgram(currentProgram());
-    if (!next) return;
+    if (!next) {
+      state.ignoreEnded = true;
+      return;
+    }
     state.ignoreEnded = true;
     playProgram(next.id, true);
   }
@@ -1219,9 +1248,7 @@
     var channel = $("video-overlay-channel");
     if (title) title.textContent = program.title || "";
     if (channel) {
-      var chName = program.channel_name || "";
-      var chNum = program.channel_number;
-      channel.textContent = chNum != null && chNum !== "" ? chNum + " " + chName : chName;
+      channel.textContent = formatChannelLabel(program.channel_number, program.channel_name || "");
     }
     var thumb = $("detail-thumb");
     if (thumb) thumb.classList.add("is-live");
@@ -1235,9 +1262,7 @@
     var channel = $("hud-channel");
     if (title) title.textContent = program.title || "";
     if (channel) {
-      var chName = program.channel_name || "";
-      var chNum = program.channel_number;
-      channel.textContent = chNum != null && chNum !== "" ? chNum + " " + chName : chName;
+      channel.textContent = formatChannelLabel(program.channel_number, program.channel_name || "");
     }
   }
 
@@ -1342,10 +1367,11 @@
     var rating = $("info-banner-rating");
     var time = $("info-banner-time");
     var desc = $("info-banner-description");
-    var chName = (program && program.channel_name) || "";
-    var chNum = program && program.channel_number;
     if (channel) {
-      channel.textContent = chNum != null && chNum !== "" ? chNum + "  " + chName : chName;
+      channel.textContent = formatChannelLabel(
+        program && program.channel_number,
+        (program && program.channel_name) || ""
+      );
     }
     if (title) {
       title.textContent = lines.subtitle ? lines.title : (program && program.title) || "";
@@ -1409,6 +1435,15 @@
     if (!(dur > 0) && isFinite(video.duration)) dur = video.duration + (state.packagedFrom || 0);
     if (label) label.textContent = formatDuration(cur) + " / " + formatDuration(dur);
     if (seek && !state.seeking && dur > 0) seek.value = String(Math.round((cur / dur) * 1000));
+    if (
+      state.watching &&
+      !state.ignoreEnded &&
+      isFinite(video.duration) &&
+      video.duration > 0.5 &&
+      (video.currentTime || 0) >= video.duration - 0.25
+    ) {
+      onVideoEnded();
+    }
   }
 
   function togglePlay() {
@@ -1737,6 +1772,9 @@
           video.muted = false;
           video.play().catch(function () {});
         }
+        // The preview is already playing, so "playing" will not fire again.
+        // Leave the ended guard down or this title never advances.
+        state.ignoreEnded = false;
         parkStage();
       } else {
         startDash(program, fromStart);
@@ -1898,6 +1936,58 @@
       });
   }
 
+  function setSplashProgress(progress, message) {
+    var fill = $("splash-fill");
+    var status = $("splash-status");
+    var pct = Math.max(0, Math.min(100, Math.round((Number(progress) || 0) * 100)));
+    if (fill) fill.style.width = pct + "%";
+    if (status && message) status.textContent = message;
+  }
+
+  function hideSplash() {
+    var splash = $("splash");
+    if (!splash) return;
+    splash.hidden = true;
+  }
+
+  function pollBoot(shown) {
+    if (typeof fetch !== "function") {
+      loadSchedule();
+      return;
+    }
+    fetch("/api/boot")
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
+      .then(function (body) {
+        if (!body) throw new Error("boot");
+        if (body.ready) {
+          setSplashProgress(1, "Ready");
+          hideSplash();
+          loadSchedule();
+          return;
+        }
+        if (body.phase === "error") {
+          setSplashProgress(1, body.message || "Scan failed");
+          return;
+        }
+        var nextShown = Math.min(0.92, Math.max(Number(body.progress) || 0, shown + 0.04));
+        setSplashProgress(nextShown, body.message || "Scanning media…");
+        if (typeof setTimeout === "function") {
+          setTimeout(function () {
+            pollBoot(nextShown);
+          }, 400);
+        }
+      })
+      .catch(function () {
+        if (typeof setTimeout === "function") {
+          setTimeout(function () {
+            pollBoot(shown);
+          }, 700);
+        }
+      });
+  }
+
   function init(root) {
     state.root = root || (typeof document !== "undefined" ? document : null);
     state.scrollEl = $("grid-scroll");
@@ -1906,7 +1996,8 @@
     var skipAuto = global.LocalCableSkipAutoLoad === true;
     if (typeof fetch === "function" && !skipAuto) {
       loadUi();
-      loadSchedule();
+      if ($("splash")) pollBoot(0.02);
+      else loadSchedule();
       loadTranscodeStatus(true);
     }
     if (typeof setInterval === "function") setInterval(tick, 1000);

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from localcable.models import ScheduledProgram
+from localcable.scan import format_channel_number
 
 
 def format_clock(dt: datetime) -> str:
@@ -29,8 +30,8 @@ def osd_payload_from_program(program: ScheduledProgram) -> dict[str, Any]:
     number = program.channel_number
     return {
         "title": program.title or "",
-        "channel_name": program.channel_name or "",
-        "channel_number": "" if number is None else str(number),
+        "channel_name": (program.channel_name or "").upper(),
+        "channel_number": "" if number is None else format_channel_number(number),
         "rating": program.rating or "",
         "description": desc,
         "time_range": format_range(program.start_time, program.end_time),

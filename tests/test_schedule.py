@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from localcable.models import Channel
-from localcable.scan import scan_media_root
+from localcable.scan import scan_media_root, stable_channel_number
 from localcable.schedule import generate_schedule, sequence_for_channel
 
 
@@ -157,7 +157,10 @@ def test_unnumbered_channel_appears_in_schedule(media_root: Path, frozen_now: da
     assert "HBO" in names
     assert "Discovery" in names
     hbo = next(ch for ch in schedule.channels if ch.name == "HBO")
-    assert hbo.number == 2
+    used = {101, 205, 310}
+    discovery_number = stable_channel_number(str(media_root / "Discovery"), used)
+    used.add(discovery_number)
+    assert hbo.number == stable_channel_number(str(media_root / "HBO"), used)
     assert hbo.programs
     assert hbo.programs[0].title == "Big Movie"
 

@@ -15,6 +15,9 @@ media_roots:
 # libraries:
 #   - path: ~/Videos
 #     kind: auto
+#     # Optional. Defaults: <path>/custom_channel and <path>/music_video
+#     # custom_channels: ~/Videos/my_channels   # legacy folder-per-channel
+#     # music_videos: ~/Videos/clips            # one named channel per subfolder
 
 # Optional: parse loose downloads and move them into the Jellyfin layout.
 # Looks up titles on TVMaze (TV) and iTunes Search (movies) — no API key.

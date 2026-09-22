@@ -55,6 +55,8 @@ class PlaybackConfig:
 class LibraryRoot:
     path: Path
     kind: str = "channels"
+    custom_channels: Path | None = None
+    music_videos: Path | None = None
 
 
 @dataclass
@@ -300,7 +302,16 @@ def _parse_libraries(value: Any) -> list[LibraryRoot]:
         path = item.get("path") or item.get("root")
         if not path:
             continue
-        roots.append(LibraryRoot(path=_as_path(path), kind=normalize_kind(item.get("kind"))))
+        custom = item.get("custom_channels", item.get("custom_channel"))
+        music = item.get("music_videos", item.get("music_video"))
+        roots.append(
+            LibraryRoot(
+                path=_as_path(path),
+                kind=normalize_kind(item.get("kind")),
+                custom_channels=_as_path(custom) if custom else None,
+                music_videos=_as_path(music) if music else None,
+            )
+        )
     return roots
 
 

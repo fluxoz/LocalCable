@@ -44,6 +44,8 @@ class Channel:
     media: list[MediaFile] = field(default_factory=list)
     schedule_mode: ScheduleMode = "sequential"
     playlist: list[Path] | None = None
+    # True when the number came from an NNN_ folder or an explicit lineup number.
+    number_explicit: bool = False
 
 
 @dataclass

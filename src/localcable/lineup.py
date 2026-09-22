@@ -15,6 +15,19 @@ log = logging.getLogger(__name__)
 
 OpenFn = Callable[..., Any]
 
+CUSTOM_CHANNEL_ALIASES = {
+    "custom_channel",
+    "custom_channels",
+    "custom channel",
+    "custom channels",
+}
+MUSIC_VIDEO_ALIASES = {
+    "music_video",
+    "music_videos",
+    "music video",
+    "music videos",
+    "musicvideos",
+}
 MOVIE_DIR_ALIASES = {
     "movies",
     "movie",
@@ -60,6 +73,7 @@ class LineupSlot:
     number: int
     name: str
     keywords: tuple[str, ...]
+    explicit_number: bool = False
 
 
 # Invented cable brands. First match wins, so specific genres sit above Drama.
@@ -227,8 +241,16 @@ def configured_lineup(cfg: Any = None) -> tuple[tuple[LineupSlot, ...], LineupSl
         if not name:
             continue
         genres = row.get("genres") or row.get("keywords") or ()
-        number = int(row.get("number") or 0) or fallback.number
-        built.append(LineupSlot(number, name, tuple(str(g).lower() for g in genres)))
+        raw_number = row.get("number")
+        explicit = raw_number is not None and str(raw_number).strip() != ""
+        try:
+            number = int(raw_number) if explicit else int(fallback.number)
+        except (TypeError, ValueError):
+            explicit = False
+            number = int(fallback.number)
+        built.append(
+            LineupSlot(number, name, tuple(str(g).lower() for g in genres), explicit)
+        )
     if built:
         slots = built
     names = {str(k).strip().lower(): str(v).strip() for k, v in (getattr(cfg, "names", None) or {}).items() if v}
@@ -240,17 +262,23 @@ def configured_lineup(cfg: Any = None) -> tuple[tuple[LineupSlot, ...], LineupSl
                 if keyword in names:
                     new_name = names[keyword]
                     break
-        renamed.append(LineupSlot(slot.number, new_name, slot.keywords) if new_name else slot)
+        renamed.append(
+            LineupSlot(slot.number, new_name, slot.keywords, slot.explicit_number)
+            if new_name
+            else slot
+        )
     slots = renamed
     fallback_name = getattr(cfg, "fallback", None)
     fallback_number = getattr(cfg, "fallback_number", None)
     if "local 8" in names and not fallback_name:
         fallback_name = names["local 8"]
     if fallback_name or fallback_number is not None:
+        explicit_fb = fallback_number is not None
         fallback = LineupSlot(
-            int(fallback_number) if fallback_number is not None else fallback.number,
+            int(fallback_number) if explicit_fb else fallback.number,
             str(fallback_name or fallback.name),
             (),
+            explicit_number=explicit_fb,
         )
     return tuple(slots), fallback
 
@@ -303,6 +331,29 @@ def find_tv_dir(root: Path | str) -> Path | None:
 
 def find_movie_dir(root: Path | str) -> Path | None:
     return find_named_subdir(root, MOVIE_DIR_ALIASES)
+
+
+def find_custom_channel_dir(root: Path | str) -> Path | None:
+    return find_named_subdir(root, CUSTOM_CHANNEL_ALIASES)
+
+
+def find_music_video_dir(root: Path | str) -> Path | None:
+    return find_named_subdir(root, MUSIC_VIDEO_ALIASES)
+
+
+def resolve_extra_dir(
+    root: Path | str,
+    configured: Path | str | None,
+    aliases: set[str],
+) -> Path | None:
+    """Use an explicit settings path, otherwise a conventional sibling folder."""
+    root = Path(root)
+    if configured is not None and str(configured).strip():
+        path = Path(configured).expanduser()
+        if not path.is_absolute():
+            path = root / path
+        return path if path.is_dir() else None
+    return find_named_subdir(root, aliases)
 
 
 def _child_dirs(root: Path) -> list[Path]:
@@ -519,27 +570,47 @@ def lineup_channels(
 ) -> list[Channel]:
     """Bucket media into invented cable channels; skip empty slots."""
     mode: ScheduleMode = "random" if str(default_mode).lower() == "random" else "sequential"
+    from localcable.scan import assign_display_numbers
+
     slots, fallback = configured_lineup(lineup_config)
     buckets: dict[int, list[MediaFile]] = {}
     names: dict[int, str] = {}
+    slot_for: dict[int, LineupSlot] = {}
     for item in items:
         slot = pick_slot(item.genre, slots=slots, fallback=fallback)
         buckets.setdefault(slot.number, []).append(item)
         names[slot.number] = slot.name
-    channels: list[Channel] = []
+        slot_for[slot.number] = slot
+    draft: list[tuple[bool, int, str, list[MediaFile], list[Path]]] = []
     for number in sorted(buckets):
         media = buckets[number]
         if not media:
             continue
-        playlist = mix_playlist(media)
+        slot = slot_for[number]
+        draft.append(
+            (
+                slot.explicit_number,
+                slot.number,
+                names[number],
+                media,
+                mix_playlist(media),
+            )
+        )
+    display = assign_display_numbers(
+        [(explicit, preferred, name) for explicit, preferred, name, _media, _playlist in draft]
+    )
+    channels: list[Channel] = []
+    for (explicit, preferred, name, media, playlist), number in zip(draft, display, strict=True):
         channels.append(
             Channel(
                 number=number,
-                name=names[number],
+                name=name,
                 folder_path=Path(root).resolve(),
                 media=media,
                 schedule_mode=mode,
                 playlist=playlist,
+                number_explicit=bool(explicit and number == preferred),
             )
         )
+    channels.sort(key=lambda ch: (ch.number, ch.name.lower()))
     return channels
