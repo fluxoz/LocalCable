@@ -172,7 +172,7 @@ class AppState:
         self._boot_message = "Starting LocalCable…"
         self._boot_progress = 0.02
         self._follow_live = False
-        self._skip_eof_until: datetime | None = None
+        self._skip_eof_for: str | None = None
         self._live_stop: threading.Event | None = None
         self._live_thread: threading.Thread | None = None
         extra_env = getattr(self.player, "extra_env", None)
@@ -427,9 +427,9 @@ class AppState:
             hit = self.next_airing(program)
         if hit is None or hit.id == program.id:
             return
-        # The file that just hit the boundary may still emit eof. Ignore that
-        # handoff so it does not skip the airing we just joined.
-        self._skip_eof_until = self.now_fn() + timedelta(seconds=3)
+        # The file we just left may still emit eof. Ignore that handoff while
+        # the new airing has time left so a short follow-up can still advance.
+        self._skip_eof_for = hit.id
         self.play(program_id=hit.id, from_start=False)
 
     def start_live_follow(self) -> None:
@@ -562,8 +562,13 @@ class AppState:
                 current = self.programs_by_id.get(self.selected_program_id)
         if current is None:
             return {"ok": False, "played": False, "error": "nothing playing"}
-        skip_until = self._skip_eof_until
-        if skip_until is not None and self.now_fn() < skip_until:
+        guard = self._skip_eof_for
+        self._skip_eof_for = None
+        if (
+            guard
+            and current.id == guard
+            and self.now_fn() + timedelta(milliseconds=400) < current.end_time
+        ):
             return {
                 "ok": True,
                 "played": False,
@@ -790,11 +795,15 @@ class AppState:
         return None
 
     def play_channel(self, number: int) -> dict[str, Any]:
-        schedule = self.refresh()
+        self.refresh()
+        now = self.now_fn()
+        self.ensure_covers(now)
         channel = self._channel_by_number(int(number))
         if channel is None:
             raise KeyError(number)
-        program = program_airing_on(channel, self.now_fn())
+        program = self._program_on_air(channel.number, now)
+        if program is None:
+            program = program_airing_on(channel, now)
         self.selected_channel = channel.number
         if program is None:
             return {

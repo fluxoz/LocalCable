@@ -361,6 +361,21 @@ __JS__
     guide.maybeFollowLive();
     selected = st.selectedId || "";
     follow = !!st.followLive;
+    var marked = document.querySelectorAll(".program.selected").length;
+    var markedId = "";
+    var markedEl = document.querySelector(".program.selected");
+    if (markedEl) markedId = markedEl.getAttribute("data-program-id") || "";
+    st.followLive = true;
+    st.liveProgramId = "p-late";
+    st.selectedId = "p-late";
+    st.watching = true;
+    st.ignoreEnded = false;
+    st.advanceLock = false;
+    st.playerMode = "browser";
+    st.nowOverride = new Date(late.end_time).getTime();
+    guide.onVideoEnded();
+    var afterEof = st.selectedId || "";
+    var followAfterEof = !!st.followLive;
   }} catch (err) {{
     errors.push(String(err));
   }}
@@ -369,7 +384,11 @@ __JS__
   el.textContent = JSON.stringify({{
     errors: errors,
     selected: selected,
-    follow: follow
+    follow: follow,
+    marked: marked,
+    markedId: markedId,
+    afterEof: afterEof,
+    followAfterEof: followAfterEof
   }});
   document.body.appendChild(el);
 }})();
@@ -379,3 +398,7 @@ __JS__
     assert report["errors"] == []
     assert report["selected"] == "p-office"
     assert report["follow"] is True
+    assert report["marked"] == 1
+    assert report["markedId"] == "p-office"
+    assert report["afterEof"] == "p-office"
+    assert report["followAfterEof"] is True

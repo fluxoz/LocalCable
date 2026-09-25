@@ -204,11 +204,42 @@ def test_live_clock_advances_to_the_airing_on_now(
     assert state.now_playing.start_time >= current.end_time
     assert state._follow_live is True
     assert len(recorded) >= 2
-    state._skip_eof_until = clock["now"] + timedelta(seconds=3)
+    assert state._skip_eof_for == state.now_playing.id
     skipped = state.play_next()
     assert skipped["played"] is False
     assert skipped["skipped"] is True
     assert state.now_playing.id != current.id
+    clock["now"] = state.now_playing.end_time
+    finished = state.play_next()
+    assert finished["played"] is True
+    assert finished.get("skipped") is not True
+    assert state.now_playing.start_time >= clock["now"]
+
+
+def test_channel_up_past_the_window_plays_what_is_on_now(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    clock = {"now": frozen_now}
+    config = _config(tmp_path, media_root)
+    player, recorded = _fake_player(tmp_path)
+    state = AppState(config, now_fn=lambda: clock["now"], player=player, rng=random.Random(0))
+    state.refresh(force=True)
+    assert state.schedule is not None
+    first_end = state.schedule.window_end
+    first = min(ch.number for ch in state.schedule.channels)
+    oldest = min(
+        (p for ch in state.schedule.channels for p in ch.programs),
+        key=lambda p: (p.start_time, p.id),
+    )
+    state.selected_channel = first
+    clock["now"] = first_end + timedelta(seconds=2)
+    result = state.handle_remote("channel-up")
+    assert result["ok"] is True
+    assert result["played"] is True
+    assert state.now_playing is not None
+    assert state.now_playing.id != oldest.id
+    assert state.now_playing.start_time <= clock["now"] < state.now_playing.end_time
+    assert recorded
 
 
 def test_play_next_starts_following_title(
