@@ -182,6 +182,48 @@ def test_explicit_custom_and_music_paths(tmp_path: Path):
     assert {"Toonbox", "Station", "Beyonce"} <= names
 
 
+def test_movies_library_keeps_custom_channels_and_music(tmp_path: Path):
+    _touch_video(tmp_path / "Movies" / "Up (2009)" / "Up (2009).mkv")
+    special = tmp_path / "special"
+    _touch_video(special / "Station" / "a.mkv")
+    clips = tmp_path / "clips"
+    _touch_video(clips / "Beyonce" / "nested" / "video.mp4")
+    channels = scan_libraries(
+        [
+            LibraryRoot(
+                path=tmp_path / "Movies",
+                kind="movies",
+                custom_channels=special,
+                music_videos=clips,
+            )
+        ],
+        probe_fn=_probe,
+        fetch_metadata=False,
+    )
+    names = {ch.name for ch in channels}
+    assert {"Movies", "Station", "Beyonce"} <= names
+    beyonce = next(ch for ch in channels if ch.name == "Beyonce")
+    assert len(beyonce.media) == 1
+
+
+def test_music_kind_and_second_directory(tmp_path: Path):
+    _touch_video(tmp_path / "House" / "Movies" / "Heat (1995)" / "Heat (1995).mkv")
+    _touch_video(tmp_path / "Cabin" / "Shows" / "News" / "Season 01" / "News.S01E01.mkv")
+    _touch_video(tmp_path / "Clips" / "90s Hits" / "track.mp4")
+    channels = scan_libraries(
+        [
+            LibraryRoot(path=tmp_path / "House", kind="auto"),
+            LibraryRoot(path=tmp_path / "Cabin", kind="auto"),
+            LibraryRoot(path=tmp_path / "Clips", kind="music"),
+        ],
+        probe_fn=_probe,
+        fetch_metadata=False,
+    )
+    names = {ch.name for ch in channels}
+    assert "90s Hits" in names
+    assert len(channels) >= 2
+
+
 def test_merge_channels_rewrites_collisions():
     a = Channel(number=1, name="A", folder_path=Path("/a"))
     b = Channel(number=1, name="B", folder_path=Path("/b"))

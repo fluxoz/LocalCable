@@ -640,30 +640,67 @@ def scan_libraries(
     for lib in libraries:
         path = Path(getattr(lib, "path"))
         kind = str(getattr(lib, "kind", "channels") or "channels").lower()
+        custom = getattr(lib, "custom_channels", None)
+        music = getattr(lib, "music_videos", None)
         lib_auto = {
             **auto_kwargs,
-            "custom_channels": getattr(lib, "custom_channels", None),
-            "music_videos": getattr(lib, "music_videos", None),
+            "custom_channels": custom,
+            "music_videos": music,
         }
-        if kind in {"auto", "lineup", "cable"}:
+        if kind in {"auto", "lineup", "cable", "jellyfin"}:
             groups.append(scan_auto_root(path, **lib_auto))
             continue
-        if kind == "jellyfin":
-            groups.append(scan_auto_root(path, **lib_auto))
+        if kind in {"music", "music_video", "music_videos"}:
+            groups.append(scan_music_video_root(path, **kwargs))
             continue
         if kind == "tv":
-            groups.append(scan_tv_root(path, **kwargs))
-            continue
-        if kind in {"movie", "movies"}:
-            groups.append(scan_movies_root(path, **kwargs))
-            continue
-        detected = detect_library_kind(path) if auto_channels else "channels"
-        if detected == "auto":
-            groups.append(scan_auto_root(path, **lib_auto))
-        elif detected == "tv":
-            groups.append(scan_tv_root(path, **kwargs))
-        elif detected == "movies":
-            groups.append(scan_movies_root(path, **kwargs))
+            base = scan_tv_root(path, **kwargs)
+        elif kind in {"movie", "movies"}:
+            base = scan_movies_root(path, **kwargs)
         else:
-            groups.append(scan_media_root(path, **kwargs))
+            detected = detect_library_kind(path) if auto_channels else "channels"
+            if detected == "auto":
+                groups.append(scan_auto_root(path, **lib_auto))
+                continue
+            if detected == "tv":
+                base = scan_tv_root(path, **kwargs)
+            elif detected == "movies":
+                base = scan_movies_root(path, **kwargs)
+            else:
+                base = scan_media_root(path, **kwargs)
+        groups.append(_with_extras(base, path, custom, music, kwargs))
+    return merge_channels(*groups)
+
+
+def _existing_dir(path: Path | str | None) -> Path | None:
+    if path is None or not str(path).strip():
+        return None
+    candidate = Path(path).expanduser()
+    return candidate if candidate.is_dir() else None
+
+
+def _same_dir(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return left == right
+
+
+def _with_extras(
+    base: list[Channel],
+    root: Path,
+    custom_channels: Path | str | None,
+    music_videos: Path | str | None,
+    kwargs: dict[str, Any],
+) -> list[Channel]:
+    """Folder-per-channel and music-video dirs beside a tv, movies, or legacy library."""
+    groups = [base]
+    custom_dir = _existing_dir(custom_channels)
+    if custom_dir is not None and not _same_dir(custom_dir, root):
+        groups.append(scan_media_root(custom_dir, **kwargs))
+    music_dir = _existing_dir(music_videos)
+    if music_dir is not None and not _same_dir(music_dir, root):
+        groups.append(scan_music_video_root(music_dir, **kwargs))
+    if len(groups) == 1:
+        return base
     return merge_channels(*groups)

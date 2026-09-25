@@ -205,28 +205,51 @@ def save_poster(folder: Path, url: str | None, opener: OpenFn | None) -> None:
         log.debug("poster download failed: %s", exc)
 
 
-def library_destinations(config: Any) -> tuple[Path | None, Path | None]:
-    """Return (tv_root, movies_root) from config libraries."""
-    tv: Path | None = None
-    movies: Path | None = None
-    roots = []
+def _organize_pair(lib: Any) -> tuple[Path | None, Path | None] | None:
+    """Shows dir and Movies dir for one library entry, if it can hold sorted files."""
+    from localcable.lineup import find_movie_dir, find_tv_dir
+
+    kind = getattr(lib, "kind", "channels")
+    path = Path(getattr(lib, "path")).expanduser()
+    if kind == "tv":
+        return path, None
+    if kind == "movies":
+        return None, path
+    if kind in {"auto", "jellyfin"}:
+        tv = find_tv_dir(path) or (path / "Shows")
+        movies = find_movie_dir(path) or (path / "Movies")
+        return tv, movies
+    return None
+
+
+def organize_pairs(config: Any) -> list[tuple[Path | None, Path | None]]:
+    """One (tv, movies) pair per library that auto-organize can file into."""
     getter = getattr(config, "library_roots", None)
     if callable(getter):
         roots = list(getter())
     else:
         roots = list(getattr(config, "libraries", []) or [])
+    pairs: list[tuple[Path | None, Path | None]] = []
     for lib in roots:
-        kind = getattr(lib, "kind", "channels")
-        path = Path(getattr(lib, "path"))
-        if kind == "tv" and tv is None:
-            tv = path
-        elif kind == "movies" and movies is None:
-            movies = path
-        elif kind == "jellyfin":
-            if tv is None:
-                tv = path / "Shows"
-            if movies is None:
-                movies = path / "Movies"
+        pair = _organize_pair(lib)
+        if pair is not None:
+            pairs.append(pair)
+    return pairs
+
+
+def library_destinations(config: Any) -> tuple[Path | None, Path | None]:
+    """Return (tv_root, movies_root) from config libraries.
+
+    `kind: auto` counts. The first shows directory and the first movies
+    directory win, including when they live on different library entries.
+    """
+    tv: Path | None = None
+    movies: Path | None = None
+    for pair_tv, pair_movies in organize_pairs(config):
+        if tv is None and pair_tv is not None:
+            tv = pair_tv
+        if movies is None and pair_movies is not None:
+            movies = pair_movies
     return tv, movies
 
 
@@ -295,28 +318,33 @@ def organize_library(
     library_cfg = getattr(config, "library", None)
     if library_cfg is None or not getattr(library_cfg, "auto_organize", False):
         return result
-    tv_root, movies_root = library_destinations(config)
-    if tv_root is None and movies_root is None:
-        log.warning("auto-organize is on but no tv/movies/jellyfin library is configured")
+    pairs = organize_pairs(config)
+    first_tv, first_movies = library_destinations(config)
+    if first_tv is None and first_movies is None:
+        log.warning("auto-organize is on but no tv/movies/auto library is configured")
         return result
     fetch = bool(getattr(library_cfg, "fetch_metadata", True))
-    sources: list[tuple[Path, str]] = []
+    sources: list[tuple[Path, Path | None, Path | None]] = []
     inbox = getattr(library_cfg, "inbox", None)
     if inbox is not None:
         inbox_path = Path(inbox).expanduser()
         for path in collect_videos(inbox_path, recursive=True):
-            sources.append((path, "inbox"))
-    if tv_root is not None and tv_root.is_dir():
-        for path in collect_videos(tv_root, recursive=True):
-            if not is_already_jellyfin_tv(path, tv_root):
-                sources.append((path, "tv"))
-    if movies_root is not None and movies_root.is_dir():
-        for path in collect_videos(movies_root, recursive=True):
-            if not is_already_jellyfin_movie(path, movies_root):
-                sources.append((path, "movies"))
+            sources.append((path, first_tv, first_movies))
+    for pair_tv, pair_movies in pairs:
+        tv_root = pair_tv
+        movies_root = pair_movies or first_movies
+        shows_root = pair_tv or first_tv
+        if tv_root is not None and tv_root.is_dir():
+            for path in collect_videos(tv_root, recursive=True):
+                if not is_already_jellyfin_tv(path, tv_root):
+                    sources.append((path, shows_root, movies_root))
+        if pair_movies is not None and pair_movies.is_dir():
+            for path in collect_videos(pair_movies, recursive=True):
+                if not is_already_jellyfin_movie(path, pair_movies):
+                    sources.append((path, shows_root, pair_movies))
 
     seen: set[Path] = set()
-    for source, _origin in sources:
+    for source, tv_root, movies_root in sources:
         try:
             resolved = source.resolve()
         except OSError:
