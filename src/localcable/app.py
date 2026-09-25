@@ -6,7 +6,7 @@ import html as html_lib
 import logging
 import random
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -37,7 +37,7 @@ from localcable.remote import (
     start_evdev_listener,
     step_channel,
 )
-from localcable.schedule import generate_schedule
+from localcable.schedule import extend_schedule, generate_schedule
 from localcable.transcode import TranscodeManager, parse_rungs
 from localcable.util import live_offset_seconds
 
@@ -171,6 +171,10 @@ class AppState:
         self._boot_phase = "starting"
         self._boot_message = "Starting LocalCable…"
         self._boot_progress = 0.02
+        self._follow_live = False
+        self._skip_eof_for: str | None = None
+        self._live_stop: threading.Event | None = None
+        self._live_thread: threading.Thread | None = None
         extra_env = getattr(self.player, "extra_env", None)
         if isinstance(extra_env, dict):
             extra_env["LOCALCABLE_PLAYER"] = str(config.playback.player)
@@ -254,7 +258,7 @@ class AppState:
             "ready": self._boot_phase == "ready",
         }
 
-    def refresh(self, force: bool = False) -> GuideSchedule:
+    def refresh(self, force: bool = False, *, extend: bool = False) -> GuideSchedule:
         if (
             self._boot_started
             and not self._boot_done.is_set()
@@ -266,10 +270,14 @@ class AppState:
             if (
                 not force
                 and self.schedule is not None
-                and self.schedule.window_start <= now < self.schedule.window_end
+                and self.channels
+                and (extend or self.schedule.window_start <= now)
             ):
-                self.schedule.now = now
-                return self.schedule
+                if self._grow_schedule(now, force_extend=extend):
+                    return self.schedule
+                if self.schedule.window_start <= now < self.schedule.window_end:
+                    self.schedule.now = now
+                    return self.schedule
             if self.config.library.auto_organize:
                 try:
                     organize_library(self.config, opener=self._organize_opener)
@@ -295,11 +303,7 @@ class AppState:
                 window_hours_after=self.config.schedule.window_hours_after,
                 rng=self.rng,
             )
-            self.programs_by_id = {
-                program.id: program
-                for channel in self.schedule.channels
-                for program in channel.programs
-            }
+            self._reindex_programs()
             log.info(
                 "schedule ready: %s channels, %s airings, window %s → %s",
                 len(self.schedule.channels),
@@ -308,6 +312,148 @@ class AppState:
                 self.schedule.window_end.isoformat(),
             )
             return self.schedule
+
+    def _reindex_programs(self) -> None:
+        if self.schedule is None:
+            self.programs_by_id = {}
+            return
+        self.programs_by_id = {
+            program.id: program
+            for channel in self.schedule.channels
+            for program in channel.programs
+        }
+        if self.now_playing is not None:
+            self.now_playing = self.programs_by_id.get(self.now_playing.id, self.now_playing)
+
+    def _grow_schedule(self, now: datetime, *, force_extend: bool) -> bool:
+        """Append to the current lineup. True when the caller should keep this schedule.
+
+        Rebuilding at the end of the window would reshuffle random channels and
+        restart sequential ones. Extending from the original anchor keeps every
+        airing the guide is already showing.
+        """
+        schedule = self.schedule
+        if schedule is None or not self.channels:
+            return False
+        if now < schedule.window_start and not force_extend:
+            return False
+        after = timedelta(hours=float(self.config.schedule.window_hours_after))
+        before = timedelta(hours=float(self.config.schedule.window_hours_before))
+        # Last quarter of the future horizon, capped at an hour, so a refresh
+        # in the middle of the guide does not keep appending.
+        lead = min(timedelta(hours=1), after / 4)
+        if lead < timedelta(seconds=1):
+            lead = timedelta(seconds=1)
+        near_end = now + lead >= schedule.window_end
+        if now < schedule.window_end and not near_end and not force_extend:
+            return False
+        if force_extend and not near_end:
+            new_end = schedule.window_end + after
+        else:
+            new_end = max(schedule.window_end, now + after)
+        keep_after = now - before
+        extend_schedule(
+            schedule,
+            self.channels,
+            window_end=new_end,
+            keep_after=keep_after,
+        )
+        schedule.now = now
+        self._reindex_programs()
+        log.info(
+            "schedule extended: %s airings, window %s → %s",
+            sum(len(ch.programs) for ch in schedule.channels),
+            schedule.window_start.isoformat(),
+            schedule.window_end.isoformat(),
+        )
+        return True
+
+    def ensure_covers(self, moment: datetime) -> None:
+        """Grow the guide until *moment* sits inside the window."""
+        for _ in range(8):
+            with self._lock:
+                schedule = self.schedule
+                if schedule is None or not self.channels:
+                    return
+                if schedule.window_end > moment:
+                    return
+            self.refresh(extend=True)
+
+    def _live_join(
+        self,
+        program: ScheduledProgram | None,
+        *,
+        from_start: bool,
+        start_seconds: float | None,
+    ) -> bool:
+        if program is None or from_start or start_seconds is not None:
+            return False
+        if normalize_start_from(self.config.playback.start_from) != "live":
+            return False
+        now = self.now_fn()
+        return program.start_time <= now < program.end_time
+
+    def _program_on_air(self, channel_number: int, now: datetime) -> ScheduledProgram | None:
+        with self._lock:
+            channel = self._channel_by_number(channel_number)
+            if channel is None:
+                return None
+            for program in channel.programs:
+                if program.start_time <= now < program.end_time:
+                    return program
+            return None
+
+    def maybe_advance_live(self) -> None:
+        """mpv-only: when the clock leaves the airing, join whatever is on now.
+
+        The browser (and player mode ``both``) does this from the page, so a
+        second advance here would skip a title.
+        """
+        if self.config.playback.player != "mpv":
+            return
+        if not self._follow_live:
+            return
+        program = self.now_playing
+        if program is None:
+            return
+        now = self.now_fn()
+        if now < program.end_time:
+            return
+        self.ensure_covers(now)
+        if self.now_playing is None or self.now_playing.id != program.id:
+            return
+        hit = self._program_on_air(program.channel_number, now)
+        if hit is None or hit.id == program.id:
+            hit = self.next_airing(program)
+        if hit is None or hit.id == program.id:
+            return
+        # The file we just left may still emit eof. Ignore that handoff while
+        # the new airing has time left so a short follow-up can still advance.
+        self._skip_eof_for = hit.id
+        self.play(program_id=hit.id, from_start=False)
+
+    def start_live_follow(self) -> None:
+        if self._live_stop is not None:
+            return
+        self._live_stop = threading.Event()
+
+        def loop() -> None:
+            assert self._live_stop is not None
+            while not self._live_stop.wait(0.5):
+                try:
+                    self.maybe_advance_live()
+                except Exception:
+                    log.exception("live follow failed")
+
+        self._live_thread = threading.Thread(target=loop, name="localcable-live", daemon=True)
+        self._live_thread.start()
+
+    def stop_live_follow(self) -> None:
+        stop = self._live_stop
+        if stop is not None:
+            stop.set()
+        self._live_stop = None
+        self._live_thread = None
 
     def _play_offset(
         self,
@@ -373,10 +519,17 @@ class AppState:
                 if self.now_playing is not None:
                     self.selected_program_id = self.now_playing.id
                     self.selected_channel = self.now_playing.channel_number
+                self._follow_live = self._live_join(
+                    self.now_playing,
+                    from_start=from_start,
+                    start_seconds=start_seconds,
+                )
+            else:
+                self._follow_live = False
         return result
 
     def next_airing(self, program: ScheduledProgram) -> ScheduledProgram | None:
-        """Next title on the same channel, wrapping to the earliest when the window ends."""
+        """Next title on the same channel that starts when this airing ends."""
         with self._lock:
             if self.schedule is None:
                 return None
@@ -395,21 +548,36 @@ class AppState:
                     best is None or item.start_time < best.start_time
                 ):
                     best = item
-            if best is not None:
-                return best
-            others = [item for item in channel.programs if item.id != program.id]
-            if not others:
-                return None
-            return min(others, key=lambda item: (item.start_time, item.id))
+            return best
 
     def play_next(self) -> dict[str, Any]:
-        """Start the next title on the channel that is playing, from 0:00."""
+        """Start the next title on the channel that is playing, from 0:00.
+
+        If this airing is the last one in the window, the guide grows forward
+        on the same lineup first. It does not jump back to the earliest block.
+        """
         with self._lock:
             current = self.now_playing
             if current is None and self.selected_program_id:
                 current = self.programs_by_id.get(self.selected_program_id)
         if current is None:
             return {"ok": False, "played": False, "error": "nothing playing"}
+        guard = self._skip_eof_for
+        self._skip_eof_for = None
+        if (
+            guard
+            and current.id == guard
+            and self.now_fn() + timedelta(milliseconds=400) < current.end_time
+        ):
+            return {
+                "ok": True,
+                "played": False,
+                "skipped": True,
+                "program_id": current.id,
+                "title": current.title,
+                "channel": current.channel_number,
+            }
+        self.ensure_covers(current.end_time)
         nxt = self.next_airing(current)
         if nxt is None:
             return {"ok": False, "played": False, "error": "no next program"}
@@ -451,6 +619,11 @@ class AppState:
             if self.now_playing is not None:
                 self.selected_program_id = self.now_playing.id
                 self.selected_channel = self.now_playing.channel_number
+            self._follow_live = self._live_join(
+                self.now_playing,
+                from_start=from_start,
+                start_seconds=start_seconds,
+            )
         body: dict[str, Any] = {
             "ok": True,
             "program_id": program.id,
@@ -622,11 +795,15 @@ class AppState:
         return None
 
     def play_channel(self, number: int) -> dict[str, Any]:
-        schedule = self.refresh()
+        self.refresh()
+        now = self.now_fn()
+        self.ensure_covers(now)
         channel = self._channel_by_number(int(number))
         if channel is None:
             raise KeyError(number)
-        program = program_airing_on(channel, self.now_fn())
+        program = self._program_on_air(channel.number, now)
+        if program is None:
+            program = program_airing_on(channel, now)
         self.selected_channel = channel.number
         if program is None:
             return {
@@ -800,9 +977,11 @@ def create_app(
         bundle.ensure_writable_config_dir()
         bundle.start_boot()
         bundle.start_remote_listener()
+        bundle.start_live_follow()
         try:
             yield
         finally:
+            bundle.stop_live_follow()
             bundle.stop_remote_listener()
 
     app = FastAPI(title="LocalCable", version=__version__, docs_url="/docs", lifespan=lifespan)
@@ -883,8 +1062,8 @@ def create_app(
         return FileResponse(path, media_type=mime, headers={"Cache-Control": "no-cache"})
 
     @app.get("/api/schedule")
-    def api_schedule(refresh: bool = False) -> JSONResponse:
-        schedule = bundle.refresh(force=refresh)
+    def api_schedule(refresh: bool = False, extend: bool = False) -> JSONResponse:
+        schedule = bundle.refresh(force=refresh, extend=extend and not refresh)
         return JSONResponse(schedule.to_dict(), headers={"Cache-Control": "no-store"})
 
     @app.get("/api/channels")

@@ -160,13 +160,16 @@ def generate_schedule(
             mode = "random" if str(default_mode).lower() == "random" else "sequential"
         else:
             mode = channel.schedule_mode
+        rng_state = None
         if mode == "random":
+            channel_rng = _channel_rng(channel, window_start, rng)
+            rng_state = channel_rng.getstate()
             programs = pack_random(
                 channel.media,
                 channel=channel,
                 window_start=window_start,
                 window_end=window_end,
-                rng=_channel_rng(channel, window_start, rng),
+                rng=channel_rng,
             )
         else:
             programs = pack_sequential(
@@ -182,6 +185,7 @@ def generate_schedule(
                 folder_path=channel.folder_path,
                 schedule_mode=mode,
                 programs=programs,
+                pack_rng_state=rng_state,
             )
         )
     packed.sort(key=lambda ch: (ch.number, natural_key(ch.name)))
@@ -190,4 +194,121 @@ def generate_schedule(
         window_start=window_start,
         window_end=window_end,
         channels=packed,
+        pack_start=window_start,
     )
+
+
+def _pack_channel(
+    packed: ChannelSchedule,
+    channel: Channel,
+    anchor: datetime,
+    window_end: datetime,
+) -> list[ScheduledProgram]:
+    if packed.schedule_mode == "random":
+        channel_rng = random.Random()
+        if packed.pack_rng_state is not None:
+            try:
+                channel_rng.setstate(packed.pack_rng_state)
+            except (TypeError, ValueError):
+                channel_rng = _channel_rng(channel, anchor, None)
+        else:
+            channel_rng = _channel_rng(channel, anchor, None)
+        return pack_random(
+            channel.media,
+            channel=channel,
+            window_start=anchor,
+            window_end=window_end,
+            rng=channel_rng,
+        )
+    return pack_sequential(
+        channel.media,
+        channel=channel,
+        window_start=anchor,
+        window_end=window_end,
+    )
+
+
+def _extends(existing: list[ScheduledProgram], fresh: list[ScheduledProgram]) -> bool:
+    """True when every existing airing still appears, in order, in *fresh*."""
+    if not existing:
+        return True
+    positions = {program.id: index for index, program in enumerate(fresh)}
+    last = -1
+    for program in existing:
+        index = positions.get(program.id)
+        if index is None or index <= last:
+            return False
+        last = index
+    return True
+
+
+def _append_unaligned(
+    packed: ChannelSchedule,
+    channel: Channel,
+    window_end: datetime,
+) -> list[ScheduledProgram]:
+    """Media changed under a live guide. Keep the airings already on screen and fill the tail."""
+    existing = list(packed.programs)
+    if not existing:
+        return existing
+    cursor = existing[-1].end_time
+    if cursor >= window_end:
+        return existing
+    if packed.schedule_mode == "random":
+        tail_rng = _channel_rng(channel, cursor, None)
+        tail = pack_random(
+            channel.media,
+            channel=channel,
+            window_start=cursor,
+            window_end=window_end,
+            rng=tail_rng,
+        )
+    else:
+        tail = pack_sequential(
+            channel.media,
+            channel=channel,
+            window_start=cursor,
+            window_end=window_end,
+        )
+    seen = {program.id for program in existing}
+    for program in tail:
+        if program.id in seen or program.start_time < cursor:
+            continue
+        existing.append(program)
+        seen.add(program.id)
+    return existing
+
+
+def extend_schedule(
+    schedule: GuideSchedule,
+    channels: list[Channel],
+    *,
+    window_end: datetime,
+    keep_after: datetime | None = None,
+) -> GuideSchedule:
+    """Append airings through *window_end* without renumbering the ones already packed.
+
+    Random channels replay the shuffle captured at generation, so the overlap
+    stays put and only the tail is new. *keep_after* drops airings that ended
+    before the visible past horizon. *pack_start* does not move.
+    """
+    if schedule.pack_start is None:
+        schedule.pack_start = schedule.window_start
+    anchor = schedule.pack_start
+    target_end = max(schedule.window_end, window_end)
+    by_number = {channel.number: channel for channel in channels}
+    for packed in schedule.channels:
+        channel = by_number.get(packed.number)
+        if channel is None or target_end <= schedule.window_end:
+            programs = list(packed.programs)
+        else:
+            fresh = _pack_channel(packed, channel, anchor, target_end)
+            programs = fresh if _extends(packed.programs, fresh) else _append_unaligned(packed, channel, target_end)
+        if keep_after is not None:
+            programs = [program for program in programs if program.end_time > keep_after]
+        packed.programs = programs
+    if target_end > schedule.window_end:
+        schedule.window_end = target_end
+    if keep_after is not None and keep_after > schedule.window_start:
+        schedule.window_start = keep_after
+    return schedule

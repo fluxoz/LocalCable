@@ -87,6 +87,15 @@
     infoTimer: null,
     streamSeq: 0,
     ignoreEnded: false,
+    followLive: false,
+    liveProgramId: null,
+    autoFollow: false,
+    advanceLock: false,
+    scheduleRequest: false,
+    scheduleWaiters: null,
+    extendedFor: null,
+    pendingExtend: false,
+    nowOverride: null,
     seeking: false,
     settingsOpen: false,
     transcodeTimer: null,
@@ -234,6 +243,7 @@
   }
 
   function nowMs() {
+    if (state.nowOverride != null && isFinite(state.nowOverride)) return Number(state.nowOverride);
     return Date.now();
   }
 
@@ -1103,23 +1113,21 @@
     focusChannel(channels[0], now);
   }
 
-  function selectProgram(id) {
-    var program = (state.programs && state.programs[id]) || findProgram(id);
+  function paintSelection(program) {
     if (!program) return;
-    state.selectedId = id;
+    state.selectedId = program.id;
     if (program.channel_number != null) highlightChannel(program.channel_number);
     var blocks = typeof document !== "undefined" ? document.querySelectorAll(".program.selected") : [];
     for (var i = 0; i < blocks.length; i += 1) {
       blocks[i].classList.remove("selected");
     }
-    var el = $("program-" + id);
+    var el = $("program-" + program.id);
     if (el) el.classList.add("selected");
     var title = $("detail-title");
     var channel = $("detail-channel");
     var rating = $("detail-rating");
     var time = $("detail-time");
     var desc = $("detail-description");
-    var play = $("play-button");
     if (title) title.textContent = program.title || "";
     if (channel) {
       channel.textContent = formatChannelLabel(program.channel_number, program.channel_name || "");
@@ -1129,6 +1137,13 @@
     if (desc) {
       desc.textContent = program.description || "No description available.";
     }
+  }
+
+  function selectProgram(id) {
+    var program = (state.programs && state.programs[id]) || findProgram(id);
+    if (!program) return;
+    paintSelection(program);
+    var play = $("play-button");
     if (play) play.disabled = false;
     var status = $("footer-status");
     if (status) status.textContent = "Selected: " + program.title;
@@ -1176,7 +1191,22 @@
     return null;
   }
 
-  function nextProgram(program) {
+  function airingNow(program, ms) {
+    if (!program || !program.start_time || !program.end_time) return false;
+    var at = ms == null ? nowMs() : ms;
+    return parseTime(program.start_time) <= at && at < parseTime(program.end_time);
+  }
+
+  function programOnAir(channel, ms) {
+    var programs = (channel && channel.programs) || [];
+    var at = ms == null ? nowMs() : ms;
+    for (var i = 0; i < programs.length; i += 1) {
+      if (airingNow(programs[i], at)) return programs[i];
+    }
+    return null;
+  }
+
+  function forwardNext(program) {
     if (!program) return null;
     var channel = channelForProgram(program);
     if (!channel) return null;
@@ -1184,8 +1214,6 @@
     var end = parseTime(program.end_time);
     var best = null;
     var bestStart = Infinity;
-    var wrap = null;
-    var wrapStart = Infinity;
     for (var i = 0; i < programs.length; i += 1) {
       if (programs[i].id === program.id) continue;
       var start = parseTime(programs[i].start_time);
@@ -1193,20 +1221,126 @@
         best = programs[i];
         bestStart = start;
       }
-      if (start < wrapStart) {
-        wrap = programs[i];
-        wrapStart = start;
+    }
+    return best;
+  }
+
+  function nextProgram(program) {
+    return forwardNext(program);
+  }
+
+  function playingProgram() {
+    if (state.liveProgramId) {
+      var live = (state.programs && state.programs[state.liveProgramId]) || findProgram(state.liveProgramId);
+      if (live) return live;
+    }
+    return currentProgram();
+  }
+
+  function settleLive(program, retried, guideOnly) {
+    var channel = channelForProgram(program);
+    var hit = channel ? programOnAir(channel, nowMs()) : null;
+    var next = forwardNext(program);
+    var target = null;
+    if (hit && hit.id !== program.id) target = hit;
+    else if (next && nowMs() < parseTime(next.end_time)) target = next;
+    else if (!retried) {
+      loadSchedule({
+        keep: true,
+        extend: true,
+        done: function () {
+          settleLive(program, true, guideOnly);
+        },
+      });
+      return;
+    } else if (next) {
+      target = next;
+    }
+    if (target) {
+      if (guideOnly) {
+        rememberProgram(target);
+        state.liveProgramId = target.id;
+        state.followLive = state.startFrom !== "beginning" && airingNow(target);
+      } else {
+        playProgram(target.id, false);
       }
     }
-    return best || wrap;
+    state.advanceLock = false;
+  }
+
+  function maybeFollowLive() {
+    if (!state.autoFollow || !state.followLive || state.advanceLock) return;
+    var program = playingProgram();
+    if (!program || !program.end_time) return;
+    if (nowMs() < parseTime(program.end_time)) return;
+    // mpv follows the clock on the server. The page only moves the guide.
+    var guideOnly = state.playerMode === "mpv";
+    if (!guideOnly && (!state.watching || !usesBrowser())) return;
+    state.advanceLock = true;
+    settleLive(program, false, guideOnly);
+  }
+
+  function scheduleIsThin() {
+    if (!state.schedule || !state.schedule.window_end || !state.schedule.window_start) return false;
+    var start = parseTime(state.schedule.window_start);
+    var end = parseTime(state.schedule.window_end);
+    var span = Math.max(end - start, 1);
+    var lead = Math.min(60 * 60 * 1000, span * 0.25);
+    if (nowMs() > end - lead) return true;
+    var scroller = gridScroller();
+    if (scroller && scroller.clientWidth > 80) {
+      var metrics = windowMetrics(state.schedule);
+      var margin = Math.min(45 * PX_PER_MIN, metrics.width * 0.12);
+      var viewRight = (scroller.scrollLeft || 0) + scroller.clientWidth;
+      if (viewRight > metrics.width - margin) return true;
+    }
+    return false;
+  }
+
+  function maybeExtendSchedule() {
+    if (!state.autoFollow || state.scheduleRequest || !state.schedule) return;
+    if (!scheduleIsThin()) {
+      state.extendedFor = null;
+      return;
+    }
+    var token = state.schedule.window_end;
+    if (state.extendedFor === token) return;
+    state.extendedFor = token;
+    loadSchedule({ keep: true, extend: true });
   }
 
   function onVideoEnded() {
     if (!state.watching) return;
-    if (state.ignoreEnded) return;
-    var next = nextProgram(currentProgram());
+    if (state.ignoreEnded || state.advanceLock) return;
+    var current = playingProgram();
+    if (
+      state.followLive &&
+      current &&
+      current.end_time &&
+      nowMs() >= parseTime(current.end_time) - 1500
+    ) {
+      state.advanceLock = true;
+      settleLive(current, false, false);
+      return;
+    }
+    var next = forwardNext(current);
     if (!next) {
       state.ignoreEnded = true;
+      state.advanceLock = true;
+      loadSchedule({
+        keep: true,
+        extend: true,
+        done: function () {
+          state.advanceLock = false;
+          var again = forwardNext(current);
+          if (!again) {
+            state.ignoreEnded = false;
+            return;
+          }
+          state.ignoreEnded = true;
+          playProgram(again.id, true);
+        },
+      });
       return;
     }
     state.ignoreEnded = true;
@@ -1493,10 +1627,37 @@
 
   function rememberProgram(program) {
     if (!program) return;
-    state.selectedId = program.id;
-    if (program.channel_number != null) highlightChannel(program.channel_number);
+    paintSelection(program);
     fillHudCopy(program);
     if (state.infoOn) fillInfoBanner(program);
+    scrollProgramIntoView(program.id);
+  }
+
+  function channelByNumber(number) {
+    var channels = (state.schedule && state.schedule.channels) || [];
+    for (var i = 0; i < channels.length; i += 1) {
+      if (channels[i].number === number) return channels[i];
+    }
+    return null;
+  }
+
+  function tuneChannel(channel) {
+    if (!channel) return;
+    var hit = programOnAir(channel, nowMs());
+    if (hit) {
+      playProgram(hit.id);
+      return;
+    }
+    loadSchedule({
+      keep: true,
+      extend: true,
+      done: function () {
+        var fresh = channelByNumber(channel.number) || channel;
+        var again = programOnAir(fresh, nowMs());
+        if (again) playProgram(again.id);
+        else focusChannel(fresh);
+      },
+    });
   }
 
   function surfChannel(delta) {
@@ -1505,9 +1666,7 @@
     var idx = currentChannelIndex(channels);
     var next = channels[(idx + delta + channels.length) % channels.length];
     if (!next) return;
-    var hit = programAt(next, nowMs());
-    if (hit) playProgram(hit.id);
-    else focusChannel(next);
+    tuneChannel(next);
   }
 
   function returnToGuide() {
@@ -1762,6 +1921,8 @@
     if (!program) return;
     state.ignoreEnded = true;
     rememberProgram(program);
+    state.liveProgramId = program.id;
+    state.followLive = !fromStart && state.startFrom !== "beginning" && airingNow(program);
     var status = $("footer-status");
     if (usesBrowser()) {
       enterWatching(program);
@@ -1815,6 +1976,8 @@
     if (state.schedule) placeNowLine(state.schedule);
     parkStage();
     syncHudTime();
+    maybeFollowLive();
+    maybeExtendSchedule();
   }
 
   function annotateChannels(schedule) {
@@ -1828,16 +1991,35 @@
     }
   }
 
-  function render(schedule) {
+  function render(schedule, opts) {
     if (!schedule) return;
+    opts = opts || {};
+    var scroller = gridScroller();
+    var prevStart = state.schedule && state.schedule.window_start ? parseTime(state.schedule.window_start) : null;
+    var prevScroll = scroller ? scroller.scrollLeft : 0;
+    var selected = state.selectedId;
     state.schedule = schedule;
     annotateChannels(schedule);
     var metrics = windowMetrics(schedule);
     renderTimeAxis(schedule, metrics);
     renderRows(schedule, metrics);
     placeNowLine(schedule);
-    selectDefault(schedule);
-    scrollNowIntoView();
+    if (opts.keep) {
+      var kept = selected && ((state.programs && state.programs[selected]) || findProgram(selected));
+      if (kept) {
+        state.selectedId = selected;
+        var keptEl = $("program-" + selected);
+        if (keptEl) keptEl.classList.add("selected");
+        if (kept.channel_number != null) highlightChannel(kept.channel_number);
+      }
+      if (scroller && prevStart != null && schedule.window_start) {
+        var delta = ((prevStart - parseTime(schedule.window_start)) / 60000) * PX_PER_MIN;
+        scroller.scrollLeft = Math.max(0, prevScroll + delta);
+      }
+    } else {
+      selectDefault(schedule);
+      scrollNowIntoView();
+    }
     var meta = $("footer-meta");
     if (meta) {
       meta.textContent = (schedule.channels || []).length + " channels";
@@ -1917,22 +2099,60 @@
       .catch(function () {});
   }
 
-  function loadSchedule() {
-    if (typeof fetch !== "function") return;
-    fetch("/api/schedule")
+  function finishScheduleWaiters(ok, done) {
+    var waiters = state.scheduleWaiters || [];
+    state.scheduleWaiters = [];
+    if (done) done(ok);
+    for (var i = 0; i < waiters.length; i += 1) waiters[i](ok);
+  }
+
+  function loadSchedule(opts) {
+    opts = opts || {};
+    if (typeof fetch !== "function") {
+      if (opts.done) opts.done(false);
+      return;
+    }
+    if (state.scheduleRequest) {
+      if (opts.extend) state.pendingExtend = true;
+      state.scheduleWaiters = state.scheduleWaiters || [];
+      state.scheduleWaiters.push(opts.done || function () {});
+      return;
+    }
+    var extend = !!opts.extend;
+    var keep = !!opts.keep;
+    state.scheduleRequest = true;
+    fetch("/api/schedule" + (extend ? "?extend=1" : ""))
       .then(function (res) {
         if (!res.ok) throw new Error("schedule " + res.status);
         return res.json();
       })
       .then(function (data) {
-        render(data);
+        if (extend && data && data.window_end) state.extendedFor = data.window_end;
+        render(data, keep && state.schedule ? { keep: true } : null);
+        state.scheduleRequest = false;
+        if (state.pendingExtend) {
+          state.pendingExtend = false;
+          loadSchedule({
+            keep: true,
+            extend: true,
+            done: function () {
+              finishScheduleWaiters(true, opts.done);
+            },
+          });
+          return;
+        }
+        finishScheduleWaiters(true, opts.done);
       })
       .catch(function (err) {
-        if (state.schedule) return;
-        if (typeof console !== "undefined" && console.warn) {
-          console.warn("LocalCable: schedule not loaded", err);
+        state.scheduleRequest = false;
+        state.pendingExtend = false;
+        if (!state.schedule) {
+          if (typeof console !== "undefined" && console.warn) {
+            console.warn("LocalCable: schedule not loaded", err);
+          }
+          showEmpty("No schedule yet. Is the LocalCable server running?");
         }
-        showEmpty("No schedule yet. Is the LocalCable server running?");
+        finishScheduleWaiters(false, opts.done);
       });
   }
 
@@ -1995,6 +2215,7 @@
     tick();
     var skipAuto = global.LocalCableSkipAutoLoad === true;
     if (typeof fetch === "function" && !skipAuto) {
+      state.autoFollow = true;
       loadUi();
       if ($("splash")) pollBoot(0.02);
       else loadSchedule();
@@ -2030,6 +2251,7 @@
     leaveWatching: leaveWatching,
     nextProgram: nextProgram,
     onVideoEnded: onVideoEnded,
+    maybeFollowLive: maybeFollowLive,
     getState: function () {
       return state;
     },

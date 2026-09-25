@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from localcable.models import Channel
+from localcable.models import Channel, MediaFile
 from localcable.scan import scan_media_root, stable_channel_number
-from localcable.schedule import generate_schedule, sequence_for_channel
+from localcable.schedule import extend_schedule, generate_schedule, sequence_for_channel
 
 
 def _window_hours(seconds: float) -> float:
@@ -163,6 +163,82 @@ def test_unnumbered_channel_appears_in_schedule(media_root: Path, frozen_now: da
     assert hbo.number == stable_channel_number(str(media_root / "HBO"), used)
     assert hbo.programs
     assert hbo.programs[0].title == "Big Movie"
+
+
+def test_extend_schedule_continues_the_same_lineup(tmp_path: Path, frozen_now: datetime):
+    root = tmp_path / "lib"
+    media = [
+        MediaFile(path=root / f"{name}.mp4", title=name, duration_seconds=60.0)
+        for name in ("Alpha", "Beta", "Gamma")
+    ]
+    sequential = Channel(
+        number=2,
+        name="Seq",
+        folder_path=root,
+        media=list(media),
+        schedule_mode="sequential",
+    )
+    shuffled = Channel(
+        number=3,
+        name="Rnd",
+        folder_path=root,
+        media=list(media),
+        schedule_mode="random",
+    )
+    schedule = generate_schedule(
+        [sequential, shuffled],
+        now=frozen_now,
+        window_hours_before=1,
+        window_hours_after=2,
+        rng=random.Random(1),
+    )
+    before = {ch.number: [p.id for p in ch.programs] for ch in schedule.channels}
+    titles = {ch.number: [p.title for p in ch.programs] for ch in schedule.channels}
+    old_end = schedule.window_end
+    extend_schedule(
+        schedule,
+        [sequential, shuffled],
+        window_end=old_end + timedelta(hours=3),
+        keep_after=schedule.window_start,
+    )
+    assert schedule.window_end >= old_end + timedelta(hours=3)
+    assert schedule.pack_start == old_end - timedelta(hours=3)
+    for ch in schedule.channels:
+        ids = [p.id for p in ch.programs]
+        assert ids[: len(before[ch.number])] == before[ch.number]
+        assert [p.title for p in ch.programs][: len(titles[ch.number])] == titles[ch.number]
+        assert ch.programs[-1].end_time >= old_end + timedelta(hours=3)
+        _assert_abut(ch.programs)
+        assert any(p.start_time <= frozen_now < p.end_time for p in ch.programs)
+
+
+def test_extend_schedule_drops_airings_older_than_the_horizon(tmp_path: Path, frozen_now: datetime):
+    root = tmp_path / "lib"
+    channel = Channel(
+        number=4,
+        name="Seq",
+        folder_path=root,
+        media=[MediaFile(path=root / "a.mp4", title="Alpha", duration_seconds=60.0)],
+        schedule_mode="sequential",
+    )
+    schedule = generate_schedule(
+        [channel],
+        now=frozen_now,
+        window_hours_before=1,
+        window_hours_after=1,
+    )
+    kept = next(p for p in schedule.channels[0].programs if p.start_time <= frozen_now < p.end_time)
+    extend_schedule(
+        schedule,
+        [channel],
+        window_end=schedule.window_end + timedelta(hours=1),
+        keep_after=frozen_now,
+    )
+    ids = [p.id for p in schedule.channels[0].programs]
+    assert kept.id in ids
+    assert all(p.end_time > frozen_now for p in schedule.channels[0].programs)
+    assert schedule.window_start == frozen_now
+    _assert_abut(schedule.channels[0].programs)
 
 
 def test_empty_channel_appears_with_no_programs(tmp_path: Path, frozen_now: datetime):
