@@ -154,10 +154,12 @@ Opt-in. Parses loose filenames (`Show.Name.S01E02.720p.mkv`, `Movie.Name.1999.Bl
 library:
   auto_channels: true        # genre mix + invented names (default)
   min_channels: 24           # pad the guide; extra rows get unique invented names
-  auto_organize: true
+  auto_organize: true        # works with kind: auto and kind: jellyfin
   inbox: ~/Downloads
   fetch_metadata: true       # TVMaze / iTunes genres when tags/NFO are missing
 ```
+
+`media_roots` and `libraries` scan together. A `kind: auto` library is an organize target (Shows/ and Movies/ are created under it). `kind: music` is a music-video directory on its own. Top-level `custom_channels` and `music_videos` (or the same keys under `library:`) are picked up once. A full example is `example/settings-combined.yaml`.
 
 Rename the auto channels (or replace the whole map):
 

@@ -18,6 +18,9 @@ media_roots:
 #     # Optional. Defaults: <path>/custom_channel and <path>/music_video
 #     # custom_channels: ~/Videos/my_channels   # legacy folder-per-channel
 #     # music_videos: ~/Videos/clips            # one named channel per subfolder
+#
+# Several directories, movie/show sorting, custom channels, and music videos
+# together: copy example/settings-combined.yaml
 
 # Optional: parse loose downloads and move them into the Jellyfin layout.
 # Looks up titles on TVMaze (TV) and iTunes Search (movies) — no API key.

@@ -1,0 +1,62 @@
+# Several directories, Jellyfin movie/show sorting, custom channels, and music
+# videos in one file. Copy to ~/.config/localcable/settings.yaml and edit paths.
+#
+# House is the Jellyfin parent (Movies/ + Shows/). Cabin is a second one.
+# ExtraChannels is a legacy folder-per-channel tree and is still scanned.
+# Clips is a music-video library (one channel per subfolder).
+# auto_organize files inbox downloads into the first auto library's
+# Movies/ and Shows/ (or TV Shows/, Film/, Series/, … when those already exist).
+
+media_roots:
+  - ~/Videos/ExtraChannels
+
+libraries:
+  - path: ~/Videos/House
+    kind: auto
+    custom_channels: ~/Videos/House/custom_channel
+    music_videos: ~/Videos/House/music_video
+  - path: ~/Videos/Cabin
+    kind: auto
+  - path: ~/Videos/Clips
+    kind: music
+
+# These also work here, once, if you would rather not repeat them on a library.
+# custom_channels: ~/Videos/House/custom_channel
+# music_videos: ~/Videos/House/music_video
+
+library:
+  auto_organize: true
+  inbox: ~/Downloads
+  fetch_metadata: true
+  auto_channels: true
+  min_channels: 0
+  transcode:
+    rungs: [native]
+    codec: h264
+    hw: auto
+    keep_original: false
+
+schedule:
+  window_hours_before: 6
+  window_hours_after: 18
+  default_mode: sequential
+
+playback:
+  player: browser
+  mpv_args: ["--fullscreen", "--hwdec=auto", "--profile=fast"]
+  start_from: live
+  inpage_filter: css
+  filter: off
+
+ui:
+  theme: default
+  banner: TV Listings
+  show_settings: true
+  auto_open_browser: true
+  bind_host: 127.0.0.1
+  bind_port: 8787
+
+artwork:
+  fetch: true
+
+logo: provider_logo.png

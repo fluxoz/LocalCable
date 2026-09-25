@@ -109,6 +109,53 @@ def test_library_extra_folders_from_yaml(tmp_path: Path):
     assert lib.music_videos == Path("music_video")
 
 
+def test_media_roots_survive_beside_libraries(tmp_path: Path):
+    extra = tmp_path / "ExtraChannels"
+    house = tmp_path / "House"
+    clips = tmp_path / "Clips"
+    settings = tmp_path / "settings.yaml"
+    settings.write_text(
+        "\n".join(
+            [
+                "media_roots:",
+                f"  - {extra}",
+                "libraries:",
+                f"  - path: {house}",
+                "    kind: auto",
+                "library:",
+                "  auto_organize: true",
+                f"  custom_channels: {tmp_path / 'custom_channel'}",
+                f"  music_videos: {clips}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = load_config(settings)
+    roots = config.library_roots()
+    kinds = [(lib.kind, lib.path) for lib in roots]
+    assert ( "auto", house ) in [(k, p) for k, p in kinds]
+    assert any(lib.kind == "channels" and lib.path == extra for lib in roots)
+    auto = next(lib for lib in roots if lib.kind == "auto")
+    assert auto.custom_channels == tmp_path / "custom_channel"
+    assert auto.music_videos == clips
+    assert config.library.auto_organize is True
+
+
+def test_combined_example_settings_keep_every_source():
+    settings = Path(__file__).resolve().parents[1] / "example" / "settings-combined.yaml"
+    config = load_config(settings)
+    roots = config.library_roots()
+    kinds = [lib.kind for lib in roots]
+    assert kinds.count("auto") == 2
+    assert "music" in kinds
+    assert "channels" in kinds
+    house = next(lib for lib in roots if lib.path.name == "House")
+    assert house.custom_channels is not None
+    assert house.music_videos is not None
+    assert config.library.auto_organize is True
+
+
 def test_lineup_names_from_yaml(tmp_path: Path):
     settings = tmp_path / "settings.yaml"
     settings.write_text(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +89,9 @@ class LibraryConfig:
     auto_channels: bool = True
     min_channels: int = 0
     transcode: TranscodeConfig = field(default_factory=TranscodeConfig)
+    # Shared extras. Applied once, on top of any per-library custom_channels / music_videos.
+    custom_channels: Path | None = None
+    music_videos: Path | None = None
 
 
 @dataclass
@@ -142,9 +145,36 @@ class AppConfig:
     logo_filename: str = DEFAULT_LOGO_FILENAME
 
     def library_roots(self) -> list[LibraryRoot]:
+        """Every directory that should be scanned, including extras and media_roots.
+
+        A `libraries:` list used to hide `media_roots`, and top-level custom
+        channel / music video paths were ignored. Both are included here so one
+        settings file can mix several directories with sorting, custom channels,
+        and music videos.
+        """
         if self.libraries:
-            return list(self.libraries)
-        return [LibraryRoot(path=path, kind="channels") for path in self.media_roots]
+            libs = list(self.libraries)
+        else:
+            libs = [LibraryRoot(path=path, kind="channels") for path in self.media_roots]
+        known = {_path_key(lib.path) for lib in libs}
+        for path in self.media_roots:
+            key = _path_key(path)
+            if key not in known:
+                libs.append(LibraryRoot(path=path, kind="channels"))
+                known.add(key)
+        libs = _attach_shared_extra(
+            libs,
+            self.library.custom_channels,
+            attr="custom_channels",
+            fallback_kind="channels",
+        )
+        libs = _attach_shared_extra(
+            libs,
+            self.library.music_videos,
+            attr="music_videos",
+            fallback_kind="music",
+        )
+        return libs
 
     @property
     def logo_path(self) -> Path:
@@ -243,6 +273,8 @@ def normalize_kind(value: Any, default: str = "channels") -> str:
         return "jellyfin"
     if text in {"auto", "lineup", "cable"}:
         return "auto"
+    if text in {"music", "music_video", "music_videos", "musicvideos"}:
+        return "music"
     return default
 
 
@@ -285,6 +317,52 @@ def _parse_palette(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _path_key(path: Path | str) -> str:
+    expanded = Path(path).expanduser()
+    try:
+        return str(expanded.resolve())
+    except OSError:
+        return str(expanded)
+
+
+def _inside(child: Path, parent: Path) -> bool:
+    try:
+        child.expanduser().resolve().relative_to(parent.expanduser().resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _with_attr(libs: list[LibraryRoot], index: int, attr: str, extra: Path) -> list[LibraryRoot]:
+    return libs[:index] + [replace(libs[index], **{attr: extra})] + libs[index + 1 :]
+
+
+def _attach_shared_extra(
+    libs: list[LibraryRoot],
+    extra: Path | None,
+    *,
+    attr: str,
+    fallback_kind: str,
+) -> list[LibraryRoot]:
+    """Use *extra* once: on the library that contains it, else on the first auto library."""
+    if extra is None:
+        return libs
+    key = _path_key(extra)
+    for lib in libs:
+        current = getattr(lib, attr)
+        if current is not None and _path_key(current) == key:
+            return libs
+        if _path_key(lib.path) == key:
+            return libs
+    for index, lib in enumerate(libs):
+        if getattr(lib, attr) is None and _inside(extra, lib.path):
+            return _with_attr(libs, index, attr, extra)
+    for index, lib in enumerate(libs):
+        if lib.kind in {"auto", "jellyfin"} and getattr(lib, attr) is None:
+            return _with_attr(libs, index, attr, extra)
+    return [*libs, LibraryRoot(path=extra, kind=fallback_kind)]
 
 
 def _parse_libraries(value: Any) -> list[LibraryRoot]:
@@ -457,6 +535,18 @@ def load_config(
     )
     artwork = ArtworkConfig(fetch=bool(art_raw.get("fetch", True)))
     inbox = lib_raw.get("inbox") or lib_raw.get("organize_from")
+    shared_custom = (
+        lib_raw.get("custom_channels")
+        or lib_raw.get("custom_channel")
+        or raw.get("custom_channels")
+        or raw.get("custom_channel")
+    )
+    shared_music = (
+        lib_raw.get("music_videos")
+        or lib_raw.get("music_video")
+        or raw.get("music_videos")
+        or raw.get("music_video")
+    )
     auto_channels = lib_raw.get("auto_channels")
     if auto_channels is None:
         auto_channels = True
@@ -474,6 +564,8 @@ def load_config(
         fetch_metadata=bool(lib_raw.get("fetch_metadata", True)),
         auto_channels=bool(auto_channels),
         min_channels=max(0, int(lib_raw.get("min_channels", 0) or 0)),
+        custom_channels=_as_path(shared_custom) if shared_custom else None,
+        music_videos=_as_path(shared_music) if shared_music else None,
         transcode=TranscodeConfig(
             rungs=rungs_list or ["native"],
             codec=str(xc_raw.get("codec", "h264")),

@@ -128,6 +128,36 @@ def test_organize_moves_inbox_without_overwrite(tmp_path: Path):
     assert already.read_bytes() == b"existing"
 
 
+def test_auto_kind_is_an_organize_target(tmp_path: Path):
+    house = tmp_path / "House"
+    cabin = tmp_path / "Cabin"
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "The.Office.S01E01.mkv").write_bytes(b"ep")
+    (inbox / "Heat.1995.mkv").write_bytes(b"movie")
+    loose = cabin / "Shows" / "Pilot.S01E02.mkv"
+    loose.parent.mkdir(parents=True)
+    loose.write_bytes(b"loose")
+    config = AppConfig(
+        libraries=[
+            LibraryRoot(path=house, kind="auto"),
+            LibraryRoot(path=cabin, kind="auto"),
+        ],
+        library=LibraryConfig(auto_organize=True, inbox=inbox, fetch_metadata=False),
+    )
+    result = organize_library(config, dry_run=False)
+    moved = {row.source.name: row.dest for row in result.moved}
+    office = moved["The.Office.S01E01.mkv"]
+    heat = moved["Heat.1995.mkv"]
+    assert str(house) in str(office)
+    assert office.parent.name == "Season 01"
+    assert str(house) in str(heat)
+    assert heat.parent.name.startswith("Heat")
+    pilot = moved["Pilot.S01E02.mkv"]
+    assert str(cabin) in str(pilot)
+    assert not (inbox / "The.Office.S01E01.mkv").exists()
+
+
 def test_organize_off_is_noop(tmp_path: Path):
     inbox = tmp_path / "inbox"
     inbox.mkdir()
