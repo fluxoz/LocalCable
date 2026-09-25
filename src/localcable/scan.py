@@ -400,24 +400,35 @@ def merge_channels(*groups: list[Channel]) -> list[Channel]:
     return out
 
 
-def pad_channels(channels: list[Channel], minimum: int) -> list[Channel]:
-    """Repeat existing channels until *minimum* rows fill the guide.
+def exclude_from_padding(channels: list[Channel]) -> list[Channel]:
+    """Mark rows that must appear once. min_channels will not clone them."""
+    for channel in channels:
+        channel.pad_source = False
+    return channels
 
+
+def pad_channels(channels: list[Channel], minimum: int) -> list[Channel]:
+    """Repeat pad-source channels until *minimum* rows fill the guide.
+
+    Custom channels and music videos are not sources, so they are not copied.
     Extra rows get unused invented network names instead of "Chuckle 2".
     """
     if minimum <= 0 or not channels or len(channels) >= minimum:
         return channels
+    sources = [channel for channel in channels if channel.pad_source]
+    if not sources:
+        return channels
     from localcable.lineup import extra_network_names
 
     used = {ch.number for ch in channels}
-    copies = {ch.number: 1 for ch in channels}
+    copies = {ch.number: 1 for ch in sources}
     used_names = {ch.name.strip().lower() for ch in channels}
     spare = [name for name in extra_network_names() if name.strip().lower() not in used_names]
     spare_i = 0
     out = list(channels)
     index = 0
     while len(out) < int(minimum):
-        src = channels[index % len(channels)]
+        src = sources[index % len(sources)]
         copies[src.number] = copies.get(src.number, 1) + 1
         suffix = copies[src.number]
         name = None

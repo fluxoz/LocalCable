@@ -153,7 +153,7 @@ Opt-in. Parses loose filenames (`Show.Name.S01E02.720p.mkv`, `Movie.Name.1999.Bl
 ```yaml
 library:
   auto_channels: true        # genre mix + invented names (default)
-  min_channels: 24           # pad the guide; extra rows get unique invented names
+  min_channels: 24           # pad with extra genre rows; custom and music channels stay once
   auto_organize: true        # works with kind: auto and kind: jellyfin
   inbox: ~/Downloads
   fetch_metadata: true       # TVMaze / iTunes genres when tags/NFO are missing

@@ -14,7 +14,7 @@ from localcable.jellyfin import (
 )
 from localcable.config import LibraryRoot
 from localcable.models import MediaFile
-from localcable.scan import merge_channels
+from localcable.scan import merge_channels, pad_channels
 from localcable.models import Channel
 
 
@@ -152,8 +152,18 @@ def test_jellyfin_parent_adds_custom_and_music_channels(tmp_path: Path):
     assert 0 <= by_name["Local News"].number <= 999
     assert len(by_name["90s Hits"].media) == 2
     assert len(by_name["Music Videos"].media) == 1
+    assert by_name["Thunderbolt"].pad_source is True
+    assert by_name["CNN"].pad_source is False
+    assert by_name["Local News"].pad_source is False
+    assert by_name["90s Hits"].pad_source is False
+    assert by_name["Music Videos"].pad_source is False
     numbers = [ch.number for ch in channels]
     assert len(set(numbers)) == len(numbers)
+    padded = pad_channels(channels, len(channels) + 3)
+    padded_names = [ch.name for ch in padded]
+    assert len(padded) == len(channels) + 3
+    for singular in ("CNN", "Local News", "90s Hits", "Music Videos"):
+        assert padded_names.count(singular) == 1
 
 
 def test_explicit_custom_and_music_paths(tmp_path: Path):

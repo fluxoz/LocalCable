@@ -46,6 +46,8 @@ class Channel:
     playlist: list[Path] | None = None
     # True when the number came from an NNN_ folder or an explicit lineup number.
     number_explicit: bool = False
+    # Custom channels and music videos stay singular. Padding clones the rest.
+    pad_source: bool = True
 
 
 @dataclass
