@@ -106,3 +106,21 @@ def test_pad_channels_repeats_until_minimum():
     assert len({ch.number for ch in padded}) == 5
     assert pad_channels(src, 0) == src
     assert pad_channels([], 24) == []
+
+
+def test_pad_channels_does_not_clone_custom_or_music():
+    src = [
+        Channel(number=6, name="Chuckle", folder_path=Path("/genre"), pad_source=True),
+        Channel(number=101, name="CNN", folder_path=Path("/custom/cnn"), pad_source=False),
+        Channel(number=202, name="90s Hits", folder_path=Path("/music/90s"), pad_source=False),
+    ]
+    padded = pad_channels(src, 6)
+    assert len(padded) == 6
+    assert [ch.name for ch in padded].count("CNN") == 1
+    assert [ch.name for ch in padded].count("90s Hits") == 1
+    assert sum(1 for ch in padded if not ch.pad_source) == 2
+    assert all(ch.pad_source or ch.name in {"CNN", "90s Hits"} for ch in padded)
+    assert pad_channels(
+        [Channel(number=1, name="Only Custom", folder_path=Path("/c"), pad_source=False)],
+        8,
+    )[0].name == "Only Custom"

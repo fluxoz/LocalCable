@@ -16,6 +16,7 @@ from localcable.scan import (
     _save_probe_cache,
     assign_channel_numbers,
     is_video_file,
+    exclude_from_padding,
     merge_channels,
     parse_channel_folder_name,
     scan_media_root,
@@ -531,6 +532,7 @@ def scan_music_video_root(
                 media=media,
                 schedule_mode=mode,
                 number_explicit=explicit_number is not None and folder != root,
+                pad_source=False,
             )
         )
     if dirty and cache_file is not None:
@@ -600,7 +602,7 @@ def scan_auto_root(
     groups: list[list[Channel]] = [genre]
     custom_dir = resolve_extra_dir(root, custom_channels, CUSTOM_CHANNEL_ALIASES)
     if custom_dir is not None:
-        groups.append(scan_media_root(custom_dir, **kwargs))
+        groups.append(exclude_from_padding(scan_media_root(custom_dir, **kwargs)))
     music_dir = resolve_extra_dir(root, music_videos, MUSIC_VIDEO_ALIASES)
     if music_dir is not None:
         groups.append(scan_music_video_root(music_dir, **kwargs))
@@ -697,7 +699,7 @@ def _with_extras(
     groups = [base]
     custom_dir = _existing_dir(custom_channels)
     if custom_dir is not None and not _same_dir(custom_dir, root):
-        groups.append(scan_media_root(custom_dir, **kwargs))
+        groups.append(exclude_from_padding(scan_media_root(custom_dir, **kwargs)))
     music_dir = _existing_dir(music_videos)
     if music_dir is not None and not _same_dir(music_dir, root):
         groups.append(scan_music_video_root(music_dir, **kwargs))
