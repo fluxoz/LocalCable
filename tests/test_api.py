@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -106,6 +106,109 @@ def test_schedule_api_lists_fixture_channels(
         assert 'id="splash"' in page.text
         assert "/static/splash.jpg" in page.text
         assert 'id="splash-fill"' in page.text
+
+
+def test_refresh_extends_forward_instead_of_rebuilding(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    clock = {"now": frozen_now}
+    config = _config(tmp_path, media_root)
+    player, _recorded = _fake_player(tmp_path)
+    state = AppState(config, now_fn=lambda: clock["now"], player=player, rng=random.Random(0))
+    state.refresh(force=True)
+    assert state.schedule is not None
+    first_end = state.schedule.window_end
+    first_count = sum(len(ch.programs) for ch in state.schedule.channels)
+    state.refresh()
+    assert state.schedule.window_end == first_end
+    assert sum(len(ch.programs) for ch in state.schedule.channels) == first_count
+
+    cnn = next(ch for ch in state.schedule.channels if ch.name == "CNN")
+    boundary = next(p for p in cnn.programs if p.start_time <= first_end - timedelta(seconds=1) < p.end_time)
+    clock["now"] = first_end - timedelta(seconds=1)
+    state.refresh()
+    assert state.schedule.window_end > first_end
+    cnn = next(ch for ch in state.schedule.channels if ch.name == "CNN")
+    ids = [p.id for p in cnn.programs]
+    assert boundary.id in ids
+    nxt = next(p for p in cnn.programs if p.start_time >= boundary.end_time)
+    assert nxt.start_time == boundary.end_time
+    assert nxt.id != boundary.id
+
+
+def test_schedule_extend_query_keeps_existing_airings(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    config = _config(tmp_path, media_root)
+    player, _recorded = _fake_player(tmp_path)
+    state = AppState(config, now_fn=lambda: frozen_now, player=player, rng=random.Random(0))
+    app = create_app(state=state)
+    with TestClient(app) as client:
+        first = client.get("/api/schedule")
+        assert first.status_code == 200
+        body = first.json()
+        end = datetime.fromisoformat(body["window_end"])
+        cnn = next(ch for ch in body["channels"] if ch["name"] == "CNN")
+        ids = [p["id"] for p in cnn["programs"]]
+        extended = client.get("/api/schedule?extend=1")
+        assert extended.status_code == 200
+        grown = extended.json()
+        assert datetime.fromisoformat(grown["window_end"]) > end
+        grown_cnn = next(ch for ch in grown["channels"] if ch["name"] == "CNN")
+        grown_ids = [p["id"] for p in grown_cnn["programs"]]
+        assert grown_ids[: len(ids)] == ids
+
+
+def test_play_next_at_end_of_window_continues_forward(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    config = _config(tmp_path, media_root)
+    player, recorded = _fake_player(tmp_path)
+    state = AppState(config, now_fn=lambda: frozen_now, player=player, rng=random.Random(0))
+    state.refresh(force=True)
+    assert state.schedule is not None
+    cnn = next(ch for ch in state.schedule.channels if ch.name == "CNN")
+    last = cnn.programs[-1]
+    state.now_playing = last
+    result = state.play_next()
+    assert result["ok"] is True
+    assert result["played"] is True
+    assert state.now_playing is not None
+    assert state.now_playing.id != last.id
+    assert state.now_playing.start_time >= last.end_time
+    assert recorded
+
+
+def test_live_clock_advances_to_the_airing_on_now(
+    tmp_path: Path, media_root: Path, frozen_now: datetime
+):
+    clock = {"now": frozen_now}
+    config = _config(tmp_path, media_root)
+    config.playback.start_from = "live"
+    config.playback.player = "mpv"
+    player, recorded = _fake_player(tmp_path)
+    state = AppState(config, now_fn=lambda: clock["now"], player=player, rng=random.Random(0))
+    state.refresh(force=True)
+    assert state.schedule is not None
+    cnn = next(ch for ch in state.schedule.channels if ch.name == "CNN")
+    current = next(p for p in cnn.programs if p.start_time <= frozen_now < p.end_time)
+    state.play(program_id=current.id)
+    assert state._follow_live is True
+    assert state.now_playing is not None
+    assert state.now_playing.id == current.id
+    clock["now"] = current.end_time + timedelta(milliseconds=200)
+    state.maybe_advance_live()
+    assert state.now_playing is not None
+    assert state.now_playing.id != current.id
+    assert state.now_playing.start_time <= clock["now"] < state.now_playing.end_time
+    assert state.now_playing.start_time >= current.end_time
+    assert state._follow_live is True
+    assert len(recorded) >= 2
+    state._skip_eof_until = clock["now"] + timedelta(seconds=3)
+    skipped = state.play_next()
+    assert skipped["played"] is False
+    assert skipped["skipped"] is True
+    assert state.now_playing.id != current.id
 
 
 def test_play_next_starts_following_title(

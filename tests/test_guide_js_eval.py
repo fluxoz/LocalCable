@@ -326,3 +326,56 @@ __JS__
     assert report["nextTitle"] == "The Office (2005) - S01E01 - Pilot"
     assert report["advancedTitle"] == "The Office (2005) - S01E01 - Pilot"
     assert report["previewTitle"] == "Evening News"
+
+
+@pytest.mark.skipif(_chromium() is None, reason="chromium not installed")
+def test_guide_js_follows_live_clock_onto_the_next_airing(tmp_path: Path):
+    payload = json.dumps(SCHEDULE)
+    boot = f"""
+<script>
+window.LocalCableSkipAutoLoad = true;
+window.__pageErrors = [];
+window.onerror = function (msg) {{ window.__pageErrors.push(String(msg)); }};
+</script>
+<script>
+__JS__
+</script>
+<script>
+(function () {{
+  var errors = window.__pageErrors.slice();
+  var selected = "";
+  var follow = false;
+  try {{
+    var guide = window.LocalCableGuide;
+    guide.render({payload});
+    var st = guide.getState();
+    var late = st.programs["p-late"];
+    st.autoFollow = true;
+    st.watching = true;
+    st.followLive = true;
+    st.liveProgramId = "p-late";
+    st.selectedId = "p-late";
+    st.playerMode = "browser";
+    st.startFrom = "live";
+    st.nowOverride = new Date(late.end_time).getTime();
+    guide.maybeFollowLive();
+    selected = st.selectedId || "";
+    follow = !!st.followLive;
+  }} catch (err) {{
+    errors.push(String(err));
+  }}
+  var el = document.createElement("pre");
+  el.id = "eval-report";
+  el.textContent = JSON.stringify({{
+    errors: errors,
+    selected: selected,
+    follow: follow
+  }});
+  document.body.appendChild(el);
+}})();
+</script>
+"""
+    report = _eval_guide(tmp_path, boot)
+    assert report["errors"] == []
+    assert report["selected"] == "p-office"
+    assert report["follow"] is True

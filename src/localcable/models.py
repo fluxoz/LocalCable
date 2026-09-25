@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 ScheduleMode = Literal["sequential", "random"]
 
@@ -97,6 +97,9 @@ class ChannelSchedule:
     folder_path: Path
     schedule_mode: ScheduleMode
     programs: list[ScheduledProgram] = field(default_factory=list)
+    # RNG snapshot from before this channel was packed, so a later extend
+    # replays the same shuffle and only the tail is new. Not sent to the client.
+    pack_rng_state: Any | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -114,6 +117,9 @@ class GuideSchedule:
     window_start: datetime
     window_end: datetime
     channels: list[ChannelSchedule] = field(default_factory=list)
+    # Original pack anchor. window_start moves forward as old airings drop off;
+    # pack_start stays put so a replay continues the same timeline.
+    pack_start: datetime | None = None
 
     def to_dict(self) -> dict:
         return {
