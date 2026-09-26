@@ -13,6 +13,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
+from localcable.deadline import call_with_deadline
+
 log = logging.getLogger(__name__)
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -119,11 +121,18 @@ def _open(req: urllib.request.Request, opener: OpenFn | None, timeout: float):
 
 
 def _download_image(url: str, dest: Path, opener: OpenFn | None, timeout: float = 4.0) -> bool:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    def attempt() -> bytes | None:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with _open(req, opener, timeout) as resp:
+                data = resp.read()
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            return None
+        return bytes(data) if isinstance(data, (bytes, bytearray)) else None
+
     try:
-        with _open(req, opener, timeout) as resp:
-            data = resp.read()
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        data = call_with_deadline(attempt, timeout, default=None)
+    except Exception:  # noqa: BLE001 — artwork must not pin startup
         return False
     if not isinstance(data, (bytes, bytearray)) or len(data) < 32:
         return False

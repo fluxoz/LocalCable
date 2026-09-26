@@ -288,6 +288,8 @@ __JS__
   var nextTitle = "";
   var advancedTitle = "";
   var previewTitle = "";
+  var miniTitle = "";
+  var clockTitle = "";
   try {{
     guide.render({payload});
     var late = guide.getState().programs["p-late"];
@@ -296,8 +298,31 @@ __JS__
     guide.selectProgram("p-news");
     guide.onVideoEnded();
     previewTitle = (guide.getState().programs[guide.getState().selectedId] || {{}}).title || "";
+    var st = guide.getState();
+    st.dashOn = true;
+    st.previewId = "p-news";
+    st.selectedId = "p-news";
+    st.watching = false;
+    st.ignoreEnded = false;
+    st.advanceLock = false;
+    guide.onVideoEnded();
+    miniTitle = (st.programs[st.selectedId] || {{}}).title || "";
+    st.dashOn = true;
+    st.previewId = "p-late";
+    st.selectedId = "p-late";
+    st.watching = false;
+    st.previewFollowsLive = true;
+    st.autoFollow = true;
+    st.ignoreEnded = false;
+    st.advanceLock = false;
+    st.nowOverride = new Date("2026-08-23T15:20:00+00:00").getTime();
+    guide.maybeAdvancePreview();
+    clockTitle = (st.programs[st.selectedId] || {{}}).title || "";
     guide.selectProgram("p-late");
     guide.enterWatching(late);
+    st.ignoreEnded = false;
+    st.advanceLock = false;
+    st.watching = true;
     guide.onVideoEnded();
     var advanced = guide.getState().selectedId;
     var prog = guide.getState().programs[advanced];
@@ -312,6 +337,8 @@ __JS__
     nextTitle: nextTitle,
     advancedTitle: advancedTitle,
     previewTitle: previewTitle,
+    miniTitle: miniTitle,
+    clockTitle: clockTitle,
     hasNextProgram: !!(guide && guide.nextProgram),
     hasOnEnded: !!(guide && guide.onVideoEnded)
   }});
@@ -326,6 +353,8 @@ __JS__
     assert report["nextTitle"] == "The Office (2005) - S01E01 - Pilot"
     assert report["advancedTitle"] == "The Office (2005) - S01E01 - Pilot"
     assert report["previewTitle"] == "Evening News"
+    assert report["miniTitle"] == "Late Edition"
+    assert report["clockTitle"] == "The Office (2005) - S01E01 - Pilot"
 
 
 @pytest.mark.skipif(_chromium() is None, reason="chromium not installed")

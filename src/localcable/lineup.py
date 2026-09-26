@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from localcable.models import Channel, MediaFile, ScheduleMode
+from localcable.progress import note
 
 log = logging.getLogger(__name__)
 
@@ -489,6 +490,7 @@ def enrich_genres(
     *,
     fetch: bool = False,
     opener: OpenFn | None = None,
+    cache_dir: Path | str | None = None,
 ) -> None:
     """Fill blank MediaFile.genre from NFO, then optional TVMaze / iTunes."""
     from localcable.organize import fetch_movie_metadata, fetch_tv_metadata
@@ -529,8 +531,9 @@ def enrich_genres(
         show = MOVIE_YEAR.match(show).group("title") if MOVIE_YEAR.match(show) else show
         tag = EPISODE.search(group[0].path.name)
         season, episode = (int(tag.group("season")), int(tag.group("episode"))) if tag else (1, 1)
+        note(0.94, f"Looking up {show}")
         try:
-            meta = fetch_tv_metadata(show, season, episode, opener=opener)
+            meta = fetch_tv_metadata(show, season, episode, opener=opener, cache_dir=cache_dir)
         except Exception as exc:  # noqa: BLE001
             log.debug("tv genre lookup failed for %s: %s", show, exc)
             meta = {}
@@ -550,8 +553,9 @@ def enrich_genres(
         if match:
             title = match.group("title")
             year = year or match.group("year")
+        note(0.94, f"Looking up {title}")
         try:
-            meta = fetch_movie_metadata(title, year, opener=opener)
+            meta = fetch_movie_metadata(title, year, opener=opener, cache_dir=cache_dir)
         except Exception as exc:  # noqa: BLE001
             log.debug("movie genre lookup failed for %s: %s", title, exc)
             meta = {}

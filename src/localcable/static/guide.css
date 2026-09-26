@@ -470,8 +470,24 @@ html, body {
 #splash-fill {
   height: 100%;
   width: 0%;
+  position: relative;
+  overflow: hidden;
   background: #f5c518;
   transition: width 0.35s linear;
+}
+
+#splash-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: splash-glide 1.2s linear infinite;
+}
+
+@keyframes splash-glide {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(320%); }
 }
 
 #splash-status {

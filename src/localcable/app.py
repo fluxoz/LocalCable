@@ -28,6 +28,7 @@ from localcable.scan import pad_channels
 from localcable.models import GuideSchedule, ScheduledProgram
 from localcable.organize import organize_library
 from localcable.osd import osd_payload_from_path, osd_payload_from_program, write_osd_state
+from localcable.progress import bind_progress, note, unbind_progress
 from localcable.player import MpvController, MpvNotFoundError, PlayResult, ipc_commands_for_play
 from localcable.remote import (
     match_channel_number,
@@ -258,13 +259,66 @@ class AppState:
             "ready": self._boot_phase == "ready",
         }
 
-    def refresh(self, force: bool = False, *, extend: bool = False) -> GuideSchedule:
-        if (
+    def _boot_sink(self, fraction: float, message: str) -> None:
+        if self._boot_phase != "scanning":
+            return
+        try:
+            frac = float(fraction)
+        except (TypeError, ValueError):
+            return
+        frac = min(0.97, max(0.0, frac))
+        if frac > self._boot_progress:
+            self._boot_progress = frac
+        if message:
+            self._boot_message = message
+
+    def _boot_scan_active(self) -> bool:
+        return (
+            self._boot_started
+            and not self._boot_done.is_set()
+            and threading.get_ident() == self._boot_thread_id
+        )
+
+    def _wait_for_boot(self) -> None:
+        """Block until the startup scan finishes without deadlocking it.
+
+        ``play``, ``stream``, and ``preview`` call ``refresh`` while holding
+        ``_lock``. Waiting on the boot event from inside that hold stuck the
+        splash: the scan needs the same lock to finish and set the event.
+        Drop this thread's holds across the wait.
+        """
+        if not (
             self._boot_started
             and not self._boot_done.is_set()
             and threading.get_ident() != self._boot_thread_id
         ):
+            return
+        holds = 0
+        while True:
+            try:
+                self._lock.release()
+            except RuntimeError:
+                break
+            holds += 1
+        try:
             self._boot_done.wait()
+        finally:
+            for _ in range(holds):
+                self._lock.acquire()
+
+    def refresh(self, force: bool = False, *, extend: bool = False) -> GuideSchedule:
+        self._wait_for_boot()
+        tokens = None
+        if self._boot_scan_active():
+            tokens = bind_progress(self._boot_sink)
+            note(0.12, "Scanning media…")
+        try:
+            return self._refresh_locked(force=force, extend=extend)
+        finally:
+            if tokens is not None:
+                unbind_progress(tokens)
+
+    def _refresh_locked(self, force: bool = False, *, extend: bool = False) -> GuideSchedule:
         with self._lock:
             now = self.now_fn()
             if (
@@ -279,10 +333,12 @@ class AppState:
                     self.schedule.now = now
                     return self.schedule
             if self.config.library.auto_organize:
+                note(0.14, "Organizing library…")
                 try:
                     organize_library(self.config, opener=self._organize_opener)
                 except Exception as exc:  # noqa: BLE001
                     log.warning("auto-organize failed: %s", exc)
+            note(0.18, "Scanning media…")
             channels = scan_libraries(
                 self.config.library_roots(),
                 default_mode=self.config.schedule.default_mode,
@@ -296,6 +352,7 @@ class AppState:
             channels = pad_channels(channels, self.config.library.min_channels)
             self.channels = channels
             self._remember_codecs(channels)
+            note(0.96, "Building the guide…")
             self.schedule = generate_schedule(
                 channels,
                 now=now,

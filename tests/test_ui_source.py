@@ -150,9 +150,14 @@ def test_js_is_browser_script_without_node_modules():
     assert "formatChannelName" in js
     assert "/api/boot" in js
     assert "pollBoot" in js
+    boot_fn = js.split("function pollBoot", 1)[1].split("function init", 1)[0]
+    assert "0.92" not in boot_fn
+    assert "body.progress" in boot_fn
+    assert "body.ready" in boot_fn
     assert 'addEventListener("ended"' in js
     ended_fn = js.split("function onVideoEnded", 1)[1].split("function showArt", 1)[0]
     assert "state.watching" in ended_fn
+    assert "advancePreview()" in ended_fn
     assert "playProgram" in ended_fn
     assert "next.id, true" in ended_fn
     on_key = js.split("function onKey", 1)[1].split("function currentChannelIndex", 1)[0]

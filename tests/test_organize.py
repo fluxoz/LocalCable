@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from localcable.config import AppConfig, LibraryConfig, LibraryRoot
 from localcable.jellyfin import parse_loose_filename
 from localcable.organize import (
+    _json_get,
     fetch_movie_metadata,
     fetch_tv_metadata,
     organize_library,
@@ -93,6 +95,37 @@ def test_fetch_tv_and_movie_metadata_mocked():
     assert movie["year"] == "1995"
     assert "600x600bb" in (movie.get("art_url") or "")
     assert calls
+
+
+def test_metadata_lookup_is_cached(tmp_path: Path):
+    calls: list[str] = []
+
+    def opener(req, timeout=0):
+        calls.append(getattr(req, "full_url", str(req)))
+        return FakeResp(
+            {
+                "id": 7,
+                "name": "Cached Show",
+                "premiered": "2010-01-01",
+                "summary": "Once.",
+                "genres": ["Comedy"],
+            }
+        )
+
+    first = fetch_tv_metadata("Cached Show", 1, 1, opener=opener, cache_dir=tmp_path)
+    second = fetch_tv_metadata("Cached Show", 1, 1, opener=opener, cache_dir=tmp_path)
+    assert first["show"] == "Cached Show"
+    assert second == first
+    assert len(calls) == 2
+
+
+def test_json_get_returns_when_opener_hangs():
+    def opener(req, timeout=0):
+        time.sleep(30)
+
+    started = time.monotonic()
+    assert _json_get("http://example.invalid/meta", opener, timeout=0.2) is None
+    assert time.monotonic() - started < 2
 
 
 def test_organize_moves_inbox_without_overwrite(tmp_path: Path):
