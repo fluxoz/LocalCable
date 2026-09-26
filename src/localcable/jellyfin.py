@@ -237,10 +237,14 @@ def _probe_many(
     probe_fn: Callable[..., MediaFile | None] | None,
     cache: dict[str, Any],
 ) -> tuple[list[MediaFile], bool]:
+    from localcable.progress import note_files, note_probe
+
     probe = probe_fn or probe_media
     media: list[MediaFile] = []
     dirty = False
+    note_files(len(files))
     for file_path in files:
+        note_probe(file_path.name)
         key = str(file_path.resolve()) if file_path.exists() else str(file_path)
         cached = _media_from_cache(file_path, cache.get(key) or {}) if key in cache else None
         if cached is not None:
@@ -595,7 +599,7 @@ def scan_auto_root(
             items.extend(channel.media)
     genre: list[Channel] = []
     if items:
-        enrich_genres(items, fetch=fetch_metadata, opener=opener)
+        enrich_genres(items, fetch=fetch_metadata, opener=opener, cache_dir=cache_dir)
         genre = lineup_channels(
             items, root, default_mode=default_mode, lineup_config=lineup_config
         )

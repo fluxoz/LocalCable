@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 from localcable.metadata import probe_media
 from localcable.models import Channel, MediaFile, ScheduleMode
+from localcable.progress import note_files, note_probe
 from localcable.util import natural_key
 
 log = logging.getLogger(__name__)
@@ -319,7 +320,9 @@ def scan_media_root(
         grouped = collapse_rendition_files(files)
         files = [primary for primary, _rends in grouped]
         rendition_map = {str(primary.resolve()): rends for primary, rends in grouped}
+        note_files(len(files))
         for file_path in files:
+            note_probe(file_path.name)
             key = str(file_path.resolve()) if file_path.exists() else str(file_path)
             cached = _media_from_cache(file_path, cache.get(key) or {}) if key in cache else None
             if cached is not None:

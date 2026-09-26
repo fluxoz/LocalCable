@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from localcable.artwork import USER_AGENT, _download_image
+from localcable.deadline import call_with_deadline
 from localcable.jellyfin import (
     SKIP_DIR_NAMES,
     is_already_jellyfin_movie,
@@ -26,6 +27,7 @@ from localcable.jellyfin import (
     jellyfin_tv_path,
     parse_loose_filename,
 )
+from localcable.progress import note
 from localcable.scan import is_video_file
 
 log = logging.getLogger(__name__)
@@ -53,12 +55,56 @@ def _open(req: urllib.request.Request, opener: OpenFn | None, timeout: float):
 
 
 def _json_get(url: str, opener: OpenFn | None, timeout: float = 4.0) -> Any:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    def attempt() -> Any:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with _open(req, opener, timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", errors="replace"))
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
+            return None
+
     try:
-        with _open(req, opener, timeout) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
+        return call_with_deadline(attempt, timeout, default=None)
+    except Exception:  # noqa: BLE001 — a lookup must not pin startup
         return None
+
+
+def _meta_cache_path(cache_dir: Path | str | None) -> Path | None:
+    if cache_dir is None:
+        return None
+    return Path(cache_dir) / "metadata.json"
+
+
+def _read_meta_cache(cache_dir: Path | str | None, key: str) -> dict[str, Any] | None:
+    path = _meta_cache_path(cache_dir)
+    if path is None or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    hit = data.get(key)
+    return hit if isinstance(hit, dict) else None
+
+
+def _write_meta_cache(cache_dir: Path | str | None, key: str, value: dict[str, Any]) -> None:
+    path = _meta_cache_path(cache_dir)
+    if path is None or not value:
+        return
+    try:
+        current = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    current[key] = value
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(current), encoding="utf-8")
+    except OSError as exc:
+        log.debug("could not write metadata cache: %s", exc)
 
 
 def fetch_tv_metadata(
@@ -66,8 +112,13 @@ def fetch_tv_metadata(
     season: int,
     episode: int,
     opener: OpenFn | None = None,
+    cache_dir: Path | str | None = None,
 ) -> dict[str, Any]:
     """Look up a series/episode on TVMaze. Returns whatever fields are available."""
+    key = f"tv|{show.strip().casefold()}|{int(season)}|{int(episode)}"
+    cached = _read_meta_cache(cache_dir, key)
+    if cached is not None:
+        return cached
     query = urllib.parse.quote(show)
     payload = _json_get(f"https://api.tvmaze.com/singlesearch/shows?q={query}", opener)
     if not isinstance(payload, dict):
@@ -91,7 +142,7 @@ def fetch_tv_metadata(
             episode_summary = _strip_html(ep.get("summary"))
     genres = payload.get("genres") if isinstance(payload.get("genres"), list) else []
     genre = ", ".join(str(g) for g in genres if g) or None
-    return {
+    result = {
         "kind": "tv",
         "show": name,
         "year": year,
@@ -100,13 +151,20 @@ def fetch_tv_metadata(
         "art_url": art_url,
         "genre": genre,
     }
+    _write_meta_cache(cache_dir, key, result)
+    return result
 
 
 def fetch_movie_metadata(
     title: str,
     year: str | None = None,
     opener: OpenFn | None = None,
+    cache_dir: Path | str | None = None,
 ) -> dict[str, Any]:
+    key = f"movie|{title.strip().casefold()}|{year or ''}"
+    cached = _read_meta_cache(cache_dir, key)
+    if cached is not None:
+        return cached
     term = f"{title} {year}" if year else title
     query = urllib.parse.quote(term)
     payload = _json_get(
@@ -125,7 +183,7 @@ def fetch_movie_metadata(
     art = row.get("artworkUrl100") or row.get("artworkUrl60")
     if isinstance(art, str):
         art = re_hires(art)
-    return {
+    result = {
         "kind": "movie",
         "title": name,
         "year": found_year,
@@ -133,6 +191,8 @@ def fetch_movie_metadata(
         "art_url": art,
         "genre": str(row.get("primaryGenreName") or "").strip() or None,
     }
+    _write_meta_cache(cache_dir, key, result)
+    return result
 
 
 def re_hires(url: str) -> str:
@@ -324,6 +384,7 @@ def organize_library(
         log.warning("auto-organize is on but no tv/movies/auto library is configured")
         return result
     fetch = bool(getattr(library_cfg, "fetch_metadata", True))
+    cache_dir = getattr(config, "cache_dir", None)
     sources: list[tuple[Path, Path | None, Path | None]] = []
     inbox = getattr(library_cfg, "inbox", None)
     if inbox is not None:
@@ -344,6 +405,7 @@ def organize_library(
                     sources.append((path, shows_root, pair_movies))
 
     seen: set[Path] = set()
+    note(0.15, "Organizing library…")
     for source, tv_root, movies_root in sources:
         try:
             resolved = source.resolve()
@@ -364,11 +426,23 @@ def organize_library(
             continue
         meta: dict[str, Any] = {}
         if fetch:
+            note(0.16, f"Organizing {source.name}")
             try:
                 if parsed["kind"] == "tv":
-                    meta = fetch_tv_metadata(parsed["show"], parsed["season"], parsed["episode"], opener=opener)
+                    meta = fetch_tv_metadata(
+                        parsed["show"],
+                        parsed["season"],
+                        parsed["episode"],
+                        opener=opener,
+                        cache_dir=cache_dir,
+                    )
                 else:
-                    meta = fetch_movie_metadata(parsed.get("title") or source.stem, parsed.get("year"), opener=opener)
+                    meta = fetch_movie_metadata(
+                        parsed.get("title") or source.stem,
+                        parsed.get("year"),
+                        opener=opener,
+                        cache_dir=cache_dir,
+                    )
             except Exception as exc:  # noqa: BLE001
                 log.debug("metadata lookup failed for %s: %s", source.name, exc)
                 meta = {}

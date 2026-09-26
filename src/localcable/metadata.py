@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import signal
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
+from localcable.deadline import call_with_deadline
 from localcable.models import MediaFile
 
 log = logging.getLogger(__name__)
@@ -18,6 +21,7 @@ RunFn = Callable[..., Any]
 # Bound header reads so a 20 GB NFS file is not scanned end-to-end.
 FFPROBE_PROBESIZE = "8000000"
 FFPROBE_ANALYZEDURATION = "2000000"
+FFPROBE_TIMEOUT = 12.0
 COPY_VIDEO = {"h264", "avc1"}
 COPY_AUDIO = {"aac", "mp4a"}
 
@@ -79,6 +83,59 @@ def clean_filename_title(filename: str) -> str:
     return title
 
 
+def _call_runner(run: RunFn, argv: list[str], timeout: float | None) -> Any:
+    kwargs: dict[str, Any] = {"capture_output": True, "text": True, "check": False}
+    if timeout is None:
+        return run(argv, **kwargs)
+    try:
+        return run(argv, timeout=timeout, **kwargs)
+    except TypeError:
+        return run(argv, **kwargs)
+
+
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+            return
+        except (OSError, ProcessLookupError):
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def _popen_ffprobe(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str] | None:
+    """Run ffprobe and return even if ``communicate`` never comes back."""
+    popen_kwargs: dict[str, Any] = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(argv, **popen_kwargs)
+
+    def wait() -> subprocess.CompletedProcess[str] | None:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                return None
+        return subprocess.CompletedProcess(argv, proc.returncode, stdout or "", stderr or "")
+
+    result = call_with_deadline(wait, timeout + 1.0, default=None)
+    if result is None:
+        _kill_process_group(proc)
+    return result
+
+
 def run_ffprobe(
     path: Path,
     runner: RunFn | None = None,
@@ -88,7 +145,6 @@ def run_ffprobe(
     binary: str | None = None,
 ) -> dict[str, Any]:
     """Return parsed ffprobe JSON, or {} on any failure (never raises)."""
-    run = runner or subprocess.run
     argv = [binary or "ffprobe", "-v", "error"]
     if bounded:
         argv += [
@@ -103,16 +159,24 @@ def run_ffprobe(
     else:
         argv += ["-show_format", "-show_streams"]
     argv.append(str(path))
+    timeout = FFPROBE_TIMEOUT
     try:
-        try:
-            proc = run(argv, capture_output=True, text=True, check=False, timeout=12)
-        except TypeError:
-            proc = run(argv, capture_output=True, text=True, check=False)
+        if runner is None:
+            proc = _popen_ffprobe(argv, timeout)
+        else:
+            proc = call_with_deadline(
+                lambda: _call_runner(runner, argv, timeout),
+                timeout + 1.0,
+                default=None,
+            )
     except FileNotFoundError:
         log.warning("ffprobe is not installed; cannot read duration for %s", path)
         return {}
     except Exception as exc:  # noqa: BLE001 — never crash the scan
         log.warning("ffprobe failed for %s: %s", path, exc)
+        return {}
+    if proc is None:
+        log.warning("ffprobe timed out for %s", path)
         return {}
     stdout = getattr(proc, "stdout", "") or ""
     if getattr(proc, "returncode", 0) not in (0, None):

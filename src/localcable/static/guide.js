@@ -104,6 +104,7 @@
     settingsAllowed: true,
     previewId: null,
     previewTimer: null,
+    previewFollowsLive: false,
   };
 
   function $(id) {
@@ -1309,9 +1310,63 @@
     loadSchedule({ keep: true, extend: true });
   }
 
+  function advancePreview() {
+    if (state.advanceLock || state.ignoreEnded || state.watching) return;
+    if (!state.dashOn || !state.previewId) return;
+    if (state.selectedId && state.selectedId !== state.previewId) return;
+    var current =
+      (state.programs && state.programs[state.previewId]) || findProgram(state.previewId);
+    if (!current) return;
+    var next = forwardNext(current);
+    if (!next) {
+      state.advanceLock = true;
+      state.ignoreEnded = true;
+      loadSchedule({
+        keep: true,
+        extend: true,
+        done: function () {
+          state.advanceLock = false;
+          var movedOn =
+            state.selectedId &&
+            state.selectedId !== current.id &&
+            state.selectedId !== state.previewId;
+          if (state.watching || movedOn) {
+            state.ignoreEnded = false;
+            return;
+          }
+          var again = forwardNext(current);
+          if (!again) {
+            state.ignoreEnded = false;
+            return;
+          }
+          state.ignoreEnded = true;
+          state.dashOn = false;
+          selectProgram(again.id);
+        },
+      });
+      return;
+    }
+    state.ignoreEnded = true;
+    state.dashOn = false;
+    selectProgram(next.id);
+  }
+
+  function maybeAdvancePreview() {
+    if (state.watching || !state.autoFollow || !state.previewFollowsLive || !state.dashOn) return;
+    if (state.advanceLock || state.ignoreEnded || !state.previewId) return;
+    var program =
+      (state.programs && state.programs[state.previewId]) || findProgram(state.previewId);
+    if (!program || !program.end_time) return;
+    if (nowMs() < parseTime(program.end_time)) return;
+    advancePreview();
+  }
+
   function onVideoEnded() {
-    if (!state.watching) return;
     if (state.ignoreEnded || state.advanceLock) return;
+    if (!state.watching) {
+      advancePreview();
+      return;
+    }
     var current = playingProgram();
     if (
       state.followLive &&
@@ -1681,6 +1736,7 @@
     state.previewTimer = null;
     if (state.watching) return;
     state.previewId = null;
+    state.previewFollowsLive = false;
     if (!state.dashOn) return;
     var video = $("player");
     if (video) {
@@ -1736,6 +1792,7 @@
     if (!program || state.watching) return;
     if (state.previewId === program.id && state.dashOn) return;
     state.previewId = program.id;
+    state.previewFollowsLive = airingNow(program);
     if (typeof fetch !== "function") return;
     fetch("/api/preview/" + encodeURIComponent(program.id))
       .then(function (res) {
@@ -1743,16 +1800,21 @@
       })
       .then(function (body) {
         if (state.watching) return;
-        if (!state.selectedId || state.selectedId !== program.id) return;
-        if (!body || !body.ok) return;
-        if (body.protocol === "file" && body.url) {
-          body.offset_seconds = liveOffset(program);
-          applyStreamBody(program, body, true);
+        if (!state.selectedId || state.selectedId !== program.id) {
+          state.ignoreEnded = false;
           return;
         }
-        showArt(body.art || program.art || "/art/" + program.id);
+        if (!body || !body.ok || body.protocol !== "file" || !body.url) {
+          state.ignoreEnded = false;
+          if (body && body.ok) showArt(body.art || program.art || "/art/" + program.id);
+          return;
+        }
+        body.offset_seconds = liveOffset(program);
+        applyStreamBody(program, body, true);
       })
-      .catch(function () {});
+      .catch(function () {
+        state.ignoreEnded = false;
+      });
   }
 
   function playMpv(id, fromStart) {
@@ -1977,6 +2039,7 @@
     parkStage();
     syncHudTime();
     maybeFollowLive();
+    maybeAdvancePreview();
     maybeExtendSchedule();
   }
 
@@ -2170,7 +2233,7 @@
     splash.hidden = true;
   }
 
-  function pollBoot(shown) {
+  function pollBoot() {
     if (typeof fetch !== "function") {
       loadSchedule();
       return;
@@ -2182,7 +2245,7 @@
       .then(function (body) {
         if (!body) throw new Error("boot");
         if (body.ready) {
-          setSplashProgress(1, "Ready");
+          setSplashProgress(1, body.message || "Ready");
           hideSplash();
           loadSchedule();
           return;
@@ -2191,20 +2254,13 @@
           setSplashProgress(1, body.message || "Scan failed");
           return;
         }
-        var nextShown = Math.min(0.92, Math.max(Number(body.progress) || 0, shown + 0.04));
-        setSplashProgress(nextShown, body.message || "Scanning media…");
-        if (typeof setTimeout === "function") {
-          setTimeout(function () {
-            pollBoot(nextShown);
-          }, 400);
-        }
+        var pct = Number(body.progress);
+        if (!(pct >= 0)) pct = 0;
+        setSplashProgress(pct, body.message || "Scanning media…");
+        if (typeof setTimeout === "function") setTimeout(pollBoot, 400);
       })
       .catch(function () {
-        if (typeof setTimeout === "function") {
-          setTimeout(function () {
-            pollBoot(shown);
-          }, 700);
-        }
+        if (typeof setTimeout === "function") setTimeout(pollBoot, 700);
       });
   }
 
@@ -2217,7 +2273,7 @@
     if (typeof fetch === "function" && !skipAuto) {
       state.autoFollow = true;
       loadUi();
-      if ($("splash")) pollBoot(0.02);
+      if ($("splash")) pollBoot();
       else loadSchedule();
       loadTranscodeStatus(true);
     }
@@ -2252,6 +2308,7 @@
     nextProgram: nextProgram,
     onVideoEnded: onVideoEnded,
     maybeFollowLive: maybeFollowLive,
+    maybeAdvancePreview: maybeAdvancePreview,
     getState: function () {
       return state;
     },

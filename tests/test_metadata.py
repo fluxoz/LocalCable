@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,24 @@ def test_run_ffprobe_is_bounded(tmp_path: Path):
     run_ffprobe(path, runner=runner)
     assert seen
     assert "-probesize" in seen[0]
+
+
+def test_run_ffprobe_returns_when_runner_ignores_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("localcable.metadata.FFPROBE_TIMEOUT", 0.2)
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"x")
+
+    def runner(argv, **_kwargs):
+        time.sleep(30)
+        class Result:
+            returncode = 0
+            stdout = "{}"
+
+        return Result()
+
+    started = time.monotonic()
+    assert run_ffprobe(path, runner=runner) == {}
+    assert time.monotonic() - started < 3
 
 
 def test_cleaned_filename_title_when_tags_absent(tmp_path: Path):
